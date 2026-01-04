@@ -1,0 +1,140 @@
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+from typing import List, Optional, Dict, Any
+from datetime import datetime
+
+
+class PropertyBase(BaseModel):
+    address: str
+    city: str
+    state: str
+    zip_code: str
+    price: Optional[float] = None
+    bedrooms: Optional[int] = None
+    bathrooms: Optional[float] = None
+    square_feet: Optional[int] = None
+    property_type: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+
+class PropertyCreate(PropertyBase):
+    pass
+
+class PropertyUpdate(BaseModel):
+    address: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    zip_code: Optional[str] = None
+    price: Optional[float] = None
+    bedrooms: Optional[int] = None
+    bathrooms: Optional[float] = None
+    square_feet: Optional[int] = None
+    property_type: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+
+class PropertyResponse(PropertyBase):
+    id: str
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    
+    model_config = ConfigDict(from_attributes=True)
+
+class HealthResponse(BaseModel):
+    status: str
+    timestamp: str
+    version: str
+
+
+
+class Coordinates(BaseModel):
+ 
+    latitude: float = Field(..., ge=-90, le=90, description="Latitude in decimal degrees")
+    longitude: float = Field(..., ge=-180, le=180, description="Longitude in decimal degrees")
+
+class Amenity(BaseModel):
+  
+    name: str = Field(..., description="Name of the amenity")
+    type: str = Field(..., description="Type of amenity (restaurant, park, etc.)")
+    coordinates: Coordinates
+    distance_km: float = Field(..., description="Distance in kilometers")
+    @field_validator('coordinates', mode='before')
+    @classmethod
+    def create_coordinates(cls, v):
+        if isinstance(v, dict):
+            if 'latitude' in v and 'longitude' in v:
+                return v
+            elif 'lat' in v and 'lon' in v:
+                return {'latitude': v['lat'], 'longitude': v['lon']}
+        return v
+
+class BuildingFootprint(BaseModel):
+ 
+    building_id: str
+    building_type: str
+    geometry_type: str
+    area_sq_m: Optional[float] = None
+    centroid: Coordinates
+    @field_validator('centroid', mode='before')
+    @classmethod
+    def normalize_centroid(cls, v):
+        if isinstance(v, dict):
+            if 'lat' in v and 'lon' in v:
+                return {'latitude': v['lat'], 'longitude': v['lon']}
+            elif 'latitude' in v and 'longitude' in v:
+                return v
+        return v
+
+class NeighborhoodAnalysis(BaseModel):
+    
+    address: str
+    coordinates: Coordinates
+    search_radius_m: int = Field(default=1000, description="Search radius in meters")
+    amenities: Dict[str, List[Amenity]] = Field(default_factory=dict)
+    building_footprints: List[BuildingFootprint] = Field(default_factory=list)
+    walk_score: Optional[float] = Field(None, ge=0, le=100, description="Walkability score")
+    map_path: Optional[str] = Field(None, description="Path to interactive map HTML file")
+    analysis_date: datetime = Field(default_factory=datetime.now)
+    @field_validator('coordinates', mode='before')
+    @classmethod
+    def normalize_coordinates(cls, v):
+        if isinstance(v, dict):
+            if 'latitude' in v and 'longitude' in v:
+                return v
+            elif 'lat' in v and 'lon' in v:
+                return {'latitude': v['lat'], 'longitude': v['lon']}
+        return v
+
+class NeighborhoodAnalysisRequest(BaseModel):
+   
+    address: str
+    radius_m: Optional[int] = Field(default=1000, ge=100, le=5000)
+    amenity_types: Optional[List[str]] = Field(
+        default=[
+            'restaurant', 'cafe', 'school', 'hospital',
+            'park', 'supermarket', 'bank', 'pharmacy'
+        ]
+    )
+    include_buildings: Optional[bool] = Field(default=True)
+    generate_map: Optional[bool] = Field(default=True)
+
+class NeighborhoodAnalysisResponse(BaseModel):
+  
+    analysis_id: str
+    address: str
+    status: str
+    walk_score: Optional[float] = None
+    total_amenities: int
+    amenities: Dict[str, List[Amenity]] = Field(default_factory=dict)  
+    map_url: Optional[str] = None
+    created_at: datetime
+    @field_validator('created_at', mode='before')
+    @classmethod
+    def parse_created_at(cls, v):
+        if isinstance(v, str):
+            try:
+                
+                return datetime.fromisoformat(v.replace('Z', '+00:00'))
+            except:
+                
+                pass
+        return v

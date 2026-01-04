@@ -1,0 +1,33 @@
+# Environment
+.venv/
+venv/
+.env
+.env.local
+.env.production
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# MongoDB
+*.log
+journal/
+*.lock
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Data files
+database.json
+*.db
+*.sqlite3

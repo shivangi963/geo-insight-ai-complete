@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html>
+<head>
+    
+    <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+    
+        <script>
+            L_NO_TOUCH = false;
+            L_DISABLE_3D = false;
+        </script>
+    
+    <style>html, body {width: 100%;height: 100%;margin: 0;padding: 0;}</style>
+    <style>#map {position:absolute;top:0;bottom:0;right:0;left:0;}</style>
+    <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.3/dist/leaflet.js"></script>
+    <script src="https://code.jquery.com/jquery-1.12.4.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Leaflet.awesome-markers/2.0.2/leaflet.awesome-markers.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.3/dist/leaflet.css"/>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.2/dist/css/bootstrap.min.css"/>
+    <link rel="stylesheet" href="https://netdna.bootstrapcdn.com/bootstrap/3.0.0/css/bootstrap.min.css"/>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.2.0/css/all.min.css"/>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/Leaflet.awesome-markers/2.0.2/leaflet.awesome-markers.css"/>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/python-visualization/folium/folium/templates/leaflet.awesome.rotate.min.css"/>
+    
+            <meta name="viewport" content="width=device-width,
+                initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+            <style>
+                #map_5c6ef7491d0646f151c0b8dd0497d79d {
+                    position: relative;
+                    width: 100.0%;
+                    height: 100.0%;
+                    left: 0.0%;
+                    top: 0.0%;
+                }
+                .leaflet-container { font-size: 1rem; }
+            </style>
+        
+</head>
+<body>
+    
+    
+            <div class="folium-map" id="map_5c6ef7491d0646f151c0b8dd0497d79d" ></div>
+        
+</body>
+<script>
+    
+    
+            var map_5c6ef7491d0646f151c0b8dd0497d79d = L.map(
+                "map_5c6ef7491d0646f151c0b8dd0497d79d",
+                {
+                    center: [13.3519723, 74.7870308],
+                    crs: L.CRS.EPSG3857,
+                    zoom: 15,
+                    zoomControl: true,
+                    preferCanvas: false,
+                }
+            );
+
+            
+
+        
+    
+            var tile_layer_e4b7d14df17fe4cae13231472a681b96 = L.tileLayer(
+                "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+                {"attribution": "Data by \u0026copy; \u003ca target=\"_blank\" href=\"http://openstreetmap.org\"\u003eOpenStreetMap\u003c/a\u003e, under \u003ca target=\"_blank\" href=\"http://www.openstreetmap.org/copyright\"\u003eODbL\u003c/a\u003e.", "detectRetina": false, "maxNativeZoom": 18, "maxZoom": 18, "minZoom": 0, "noWrap": false, "opacity": 1, "subdomains": "abc", "tms": false}
+            ).addTo(map_5c6ef7491d0646f151c0b8dd0497d79d);
+        
+    
+            var marker_08ccb8e624b2a231b0cdf28a3b387caf = L.marker(
+                [13.3519723, 74.7870308],
+                {}
+            ).addTo(map_5c6ef7491d0646f151c0b8dd0497d79d);
+        
+    
+            var icon_29c57217aaeca0e5b61513e1b6e9b0b7 = L.AwesomeMarkers.icon(
+                {"extraClasses": "fa-rotate-0", "icon": "info-sign", "iconColor": "white", "markerColor": "red", "prefix": "glyphicon"}
+            );
+            marker_08ccb8e624b2a231b0cdf28a3b387caf.setIcon(icon_29c57217aaeca0e5b61513e1b6e9b0b7);
+        
+    
+        var popup_586858e54de1a9ea2d8083732ff44d30 = L.popup({"maxWidth": "100%"});
+
+        
+            
+                var html_deb0b724cfd5c5eb9ca426ec22f63dca = $(`<div id="html_deb0b724cfd5c5eb9ca426ec22f63dca" style="width: 100.0%; height: 100.0%;"><b>Target:</b> Manipal, Karnataka, India</div>`)[0];
+                popup_586858e54de1a9ea2d8083732ff44d30.setContent(html_deb0b724cfd5c5eb9ca426ec22f63dca);
+            
+        
+
+        marker_08ccb8e624b2a231b0cdf28a3b387caf.bindPopup(popup_586858e54de1a9ea2d8083732ff44d30)
+        ;
+
+        
+    
+    
+            var marker_023238319c7d3d159140df041aa8d224 = L.marker(
+                [13.3517605, 74.7874661],
+                {}
+            ).addTo(map_5c6ef7491d0646f151c0b8dd0497d79d);
+        
+    
+            var icon_ab8e43142c1fcc4d685d1d4bb595a1c0 = L.AwesomeMarkers.icon(
+                {"extraClasses": "fa-rotate-0", "icon": "info-sign", "iconColor": "white", "markerColor": "blue", "prefix": "glyphicon"}
+            );
+            marker_023238319c7d3d159140df041aa8d224.setIcon(icon_ab8e43142c1fcc4d685d1d4bb595a1c0);
+        
+    
+        var popup_b047adbc7ac31a21029e8f6f429c0cb6 = L.popup({"maxWidth": "100%"});
+
+        
+            
+                var html_186c51ee3d5671940a313aa0199ca293 = $(`<div id="html_186c51ee3d5671940a313aa0199ca293" style="width: 100.0%; height: 100.0%;"><b>Dollops</b><br>Type: restaurant<br>Distance: 0.05km</div>`)[0];
+                popup_b047adbc7ac31a21029e8f6f429c0cb6.setContent(html_186c51ee3d5671940a313aa0199ca293);
+            
+        
+
+        marker_023238319c7d3d159140df041aa8d224.bindPopup(popup_b047adbc7ac31a21029e8f6f429c0cb6)
+        ;
+
+        
+    
+    
+            var marker_1efc3f20474be1350ac296574f48bf3e = L.marker(
+                [13.3515568, 74.7875808],
+                {}
+            ).addTo(map_5c6ef7491d0646f151c0b8dd0497d79d);
+        
+    
+            var icon_2d1e67fae267140ce9e34b4d1292cc27 = L.AwesomeMarkers.icon(
+                {"extraClasses": "fa-rotate-0", "icon": "info-sign", "iconColor": "white", "markerColor": "blue", "prefix": "glyphicon"}
+            );
+            marker_1efc3f20474be1350ac296574f48bf3e.setIcon(icon_2d1e67fae267140ce9e34b4d1292cc27);
+        
+    
+        var popup_6993332412df6e4e67283d2a68687a23 = L.popup({"maxWidth": "100%"});
+
+        
+            
+                var html_a585a54d3fbbbb2a1804733c65d8ef83 = $(`<div id="html_a585a54d3fbbbb2a1804733c65d8ef83" style="width: 100.0%; height: 100.0%;"><b>Eye of the Tiger</b><br>Type: restaurant<br>Distance: 0.08km</div>`)[0];
+                popup_6993332412df6e4e67283d2a68687a23.setContent(html_a585a54d3fbbbb2a1804733c65d8ef83);
+            
+        
+
+        marker_1efc3f20474be1350ac296574f48bf3e.bindPopup(popup_6993332412df6e4e67283d2a68687a23)
+        ;
+
+        
+    
+    
+            var marker_811d28de6bb19e0f7c599d918f05330d = L.marker(
+                [13.3512453, 74.7876944],
+                {}
+            ).addTo(map_5c6ef7491d0646f151c0b8dd0497d79d);
+        
+    
+            var icon_4a32e635a38abe7b1a0e7e123493c05a = L.AwesomeMarkers.icon(
+                {"extraClasses": "fa-rotate-0", "icon": "info-sign", "iconColor": "white", "markerColor": "blue", "prefix": "glyphicon"}
+            );
+            marker_811d28de6bb19e0f7c599d918f05330d.setIcon(icon_4a32e635a38abe7b1a0e7e123493c05a);
+        
+    
+        var popup_2656ec1c364103bbd55c8ae73ec63c3c = L.popup({"maxWidth": "100%"});
+
+        
+            
+                var html_413490b33278ae0417c7d7943b47d629 = $(`<div id="html_413490b33278ae0417c7d7943b47d629" style="width: 100.0%; height: 100.0%;"><b>Hadika</b><br>Type: restaurant<br>Distance: 0.11km</div>`)[0];
+                popup_2656ec1c364103bbd55c8ae73ec63c3c.setContent(html_413490b33278ae0417c7d7943b47d629);
+            
+        
+
+        marker_811d28de6bb19e0f7c599d918f05330d.bindPopup(popup_2656ec1c364103bbd55c8ae73ec63c3c)
+        ;
+
+        
+    
+    
+            var marker_069297dc949e3785c311d82f4e73d56d = L.marker(
+                [13.356443758423481, 74.78745676796537],
+                {}
+            ).addTo(map_5c6ef7491d0646f151c0b8dd0497d79d);
+        
+    
+            var icon_f8a9ffb1a1d210e48f9fa12adba60c18 = L.AwesomeMarkers.icon(
+                {"extraClasses": "fa-rotate-0", "icon": "info-sign", "iconColor": "white", "markerColor": "blue", "prefix": "glyphicon"}
+            );
+            marker_069297dc949e3785c311d82f4e73d56d.setIcon(icon_f8a9ffb1a1d210e48f9fa12adba60c18);
+        
+    
+        var popup_aa0d1e1d3d4cd4dee901d83a8b6a7b25 = L.popup({"maxWidth": "100%"});
+
+        
+            
+                var html_a49b74378396b374be9bcdf4e12b8a3d = $(`<div id="html_a49b74378396b374be9bcdf4e12b8a3d" style="width: 100.0%; height: 100.0%;"><b>Sodexho</b><br>Type: restaurant<br>Distance: 0.5km</div>`)[0];
+                popup_aa0d1e1d3d4cd4dee901d83a8b6a7b25.setContent(html_a49b74378396b374be9bcdf4e12b8a3d);
+            
+        
+
+        marker_069297dc949e3785c311d82f4e73d56d.bindPopup(popup_aa0d1e1d3d4cd4dee901d83a8b6a7b25)
+        ;
+
+        
+    
+    
+            var marker_7a03a2ba092c35005ebc0a4f32fbbf7d = L.marker(
+                [13.34805855874276, 74.78577443305228],
+                {}
+            ).addTo(map_5c6ef7491d0646f151c0b8dd0497d79d);
+        
+    
+            var icon_c5b08b8b62d7e7df6f21739246b06d9b = L.AwesomeMarkers.icon(
+                {"extraClasses": "fa-rotate-0", "icon": "info-sign", "iconColor": "white", "markerColor": "orange", "prefix": "glyphicon"}
+            );
+            marker_7a03a2ba092c35005ebc0a4f32fbbf7d.setIcon(icon_c5b08b8b62d7e7df6f21739246b06d9b);
+        
+    
+        var popup_bd85a3b2e54bc7b81365ee814929c35d = L.popup({"maxWidth": "100%"});
+
+        
+            
+                var html_e6d314eab7e1bc000fc5de0514e5108e = $(`<div id="html_e6d314eab7e1bc000fc5de0514e5108e" style="width: 100.0%; height: 100.0%;"><b>Madhavkripa School</b><br>Type: school<br>Distance: 0.45km</div>`)[0];
+                popup_bd85a3b2e54bc7b81365ee814929c35d.setContent(html_e6d314eab7e1bc000fc5de0514e5108e);
+            
+        
+
+        marker_7a03a2ba092c35005ebc0a4f32fbbf7d.bindPopup(popup_bd85a3b2e54bc7b81365ee814929c35d)
+        ;
+
+        
+    
+    
+            var marker_1ef68782e761027ed393f69cbd517ced = L.marker(
+                [13.3465464, 74.7871446],
+                {}
+            ).addTo(map_5c6ef7491d0646f151c0b8dd0497d79d);
+        
+    
+            var icon_0f729f881f5faa038212bef03958a290 = L.AwesomeMarkers.icon(
+                {"extraClasses": "fa-rotate-0", "icon": "info-sign", "iconColor": "white", "markerColor": "orange", "prefix": "glyphicon"}
+            );
+            marker_1ef68782e761027ed393f69cbd517ced.setIcon(icon_0f729f881f5faa038212bef03958a290);
+        
+    
+        var popup_246d6fdfaae99bbdc32a59a16273d311 = L.popup({"maxWidth": "100%"});
+
+        
+            
+                var html_0d18e7fb25267e688b708e4c784471d2 = $(`<div id="html_0d18e7fb25267e688b708e4c784471d2" style="width: 100.0%; height: 100.0%;"><b>Manipal Pre-University College (MPUC)</b><br>Type: school<br>Distance: 0.6km</div>`)[0];
+                popup_246d6fdfaae99bbdc32a59a16273d311.setContent(html_0d18e7fb25267e688b708e4c784471d2);
+            
+        
+
+        marker_1ef68782e761027ed393f69cbd517ced.bindPopup(popup_246d6fdfaae99bbdc32a59a16273d311)
+        ;
+
+        
+    
+    
+            var circle_6d05877df7f4d732e1840480dfa2e02c = L.circle(
+                [13.3519723, 74.7870308],
+                {"bubblingMouseEvents": true, "color": "crimson", "dashArray": null, "dashOffset": null, "fill": true, "fillColor": "crimson", "fillOpacity": 0.1, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "opacity": 1.0, "radius": 1000, "stroke": true, "weight": 3}
+            ).addTo(map_5c6ef7491d0646f151c0b8dd0497d79d);
+        
+    
+        var popup_47ef45d8f810f81163b4f8fa920636fa = L.popup({"maxWidth": "100%"});
+
+        
+            
+                var html_252f54939a5c24bc2016b2dc255584c3 = $(`<div id="html_252f54939a5c24bc2016b2dc255584c3" style="width: 100.0%; height: 100.0%;">Search Radius: 1000m</div>`)[0];
+                popup_47ef45d8f810f81163b4f8fa920636fa.setContent(html_252f54939a5c24bc2016b2dc255584c3);
+            
+        
+
+        circle_6d05877df7f4d732e1840480dfa2e02c.bindPopup(popup_47ef45d8f810f81163b4f8fa920636fa)
+        ;
+
+        
+    
+</script>
+</html>
