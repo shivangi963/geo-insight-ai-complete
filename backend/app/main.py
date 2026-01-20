@@ -5,6 +5,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
+from fastapi.responses import JSONResponse
+import logging
 import sys
 import os
 import asyncio
@@ -14,6 +16,7 @@ from app.tasks.computer_vision_tasks import analyze_street_image_task, calculate
 from app.tasks.geospatial_tasks import analyze_neighborhood_task
 from app.workflow_endpoints import router as workflow_router
 from pydantic import BaseModel
+from pathlib import Path
 
 
 current_dir = os.path.dirname(os.path.abspath(__file__))

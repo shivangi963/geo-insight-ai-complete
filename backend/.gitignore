@@ -23,3 +23,23 @@ pip-log.txt
 Thumbs.db
 
 *.log
+
+# Maps and results (auto-generated)
+maps/
+results/
+backend/maps/
+backend/results/
+
+# OSM Cache
+.osmnx_cache/
+**/.osmnx_cache/
+
+# Test outputs
+*.html
+!ui/templates/*.html
+
+# MongoDB data
+data/database/
+
+# Jupyter
+*.ipynb_checkpoints/
