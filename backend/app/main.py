@@ -13,6 +13,7 @@ from celery.result import AsyncResult
 from app.tasks.computer_vision_tasks import analyze_street_image_task, calculate_green_space_task
 from app.tasks.geospatial_tasks import analyze_neighborhood_task
 from app.workflow_endpoints import router as workflow_router
+from pydantic import BaseModel
 
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -193,51 +194,70 @@ async def process_map_generation(
         await update_analysis_status(analysis_id, "failed", {"error": str(e)})
 
 
+
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
+    """Health check endpoint"""
     return HealthResponse(
         status="ok",
         timestamp=datetime.now().isoformat(),
-        version="2.0.0"
+        version="4.0.0"
     )
 
 @app.get("/")
 async def root():
-
+    """Root endpoint with API information"""
     return {
         "message": "Welcome to GeoInsight AI API - Phase 4",
         "phase": 4,
         "status": "running",
+        "database": "MongoDB Connected",
         "endpoints": {
             "health": "/health",
             "docs": "/docs",
             "properties": "/api/properties",
             "neighborhood": "/api/neighborhood/analyze",
-            "agent": "/api/agent/query"
-        }
+            "agent": "/api/agent/query",
+            "stats": "/api/stats"
+        },
+        "features": [
+            "Property CRUD Operations",
+            "Neighborhood Analysis",
+            "AI Agent Queries",
+            "Geospatial Data Integration",
+            "Walk Score Calculation",
+            "Interactive Maps"
+        ]
     }
 
 @app.get("/api/properties", response_model=List[PropertyResponse])
 async def get_properties(
-    skip: int = Query(0, ge=0),
-    limit: int = Query(100, ge=1, le=1000)
+    skip: int = Query(0, ge=0, description="Number of records to skip"),
+    limit: int = Query(100, ge=1, le=1000, description="Max number of records to return"),
+    city: Optional[str] = Query(None, description="Filter by city")
 ):
-    properties = property_crud.get_all_properties(skip=skip, limit=limit)
+    """Get all properties with optional filtering"""
+    properties = await property_crud.get_all_properties(skip=skip, limit=limit)
+    
+    # Filter by city if provided
+    if city:
+        properties = [p for p in properties if p.get('city', '').lower() == city.lower()]
+    
     return properties
 
 @app.get("/api/properties/{property_id}", response_model=PropertyResponse)
-async def get_property(property_id: str = Path(...)):
-  
-    property = property_crud.get_property_by_id(property_id)
+async def get_property(property_id: str = Path(..., description="Property ID")):
+    """Get specific property by ID"""
+    property = await property_crud.get_property_by_id(property_id)
     if not property:
         raise HTTPException(status_code=404, detail="Property not found")
     return property
 
 @app.post("/api/properties", response_model=PropertyResponse, status_code=201)
 async def create_property(property: PropertyCreate):
-   
+    """Create new property"""
     try:
-        new_property = property_crud.create_property(property)
+        new_property = await property_crud.create_property(property)
         return new_property
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -247,18 +267,19 @@ async def update_property(
     property_id: str = Path(...),
     property: PropertyUpdate = ...
 ):
-    
-    updated_property = property_crud.update_property(property_id, property)
+    """Update existing property"""
+    updated_property = await property_crud.update_property(property_id, property)
     if not updated_property:
         raise HTTPException(status_code=404, detail="Property not found")
     return updated_property
 
 @app.delete("/api/properties/{property_id}")
 async def delete_property(property_id: str = Path(...)):
-    success = property_crud.delete_property(property_id)
+    """Delete property"""
+    success = await property_crud.delete_property(property_id)
     if not success:
         raise HTTPException(status_code=404, detail="Property not found")
-    return {"message": "Property deleted successfully"}
+    return {"message": "Property deleted successfully", "id": property_id}
 
 class QueryRequest(BaseModel):
     query: str
@@ -271,6 +292,38 @@ async def query_agent(request: QueryRequest):
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+async def process_map_generation(
+    analysis_id: str,
+    address: str,
+    amenities_data: Dict
+):
+    """Background task to generate map visualization"""
+    try:
+        map_filename = f"neighborhood_{analysis_id.replace('-', '_')}.html"
+        map_path = os.path.join("maps", map_filename)
+        
+        map_path = osm_client.create_map_visualization(
+            address=address,
+            amenities_data=amenities_data,
+            save_path=map_path
+        )
+        
+        if map_path:
+            await update_analysis_status(
+                analysis_id,
+                "completed",
+                {"map_path": map_path}
+            )
+            print(f"✅ Map generated for analysis {analysis_id}")
+        else:
+            await update_analysis_status(analysis_id, "completed")
+            
+    except Exception as e:
+        print(f"❌ Error in map generation: {e}")
+        await update_analysis_status(analysis_id, "failed", {"error": str(e)})
+
 
 
 @app.post("/api/neighborhood/analyze", response_model=NeighborhoodAnalysisResponse, status_code=202)
@@ -354,16 +407,123 @@ async def analyze_neighborhood(
         raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
 
 
-@app.get(
-    "/api/neighborhood/recent",
-    response_model=List[NeighborhoodAnalysisResponse],
-    summary="Get recent analyses",
-    description="Get list of recent neighborhood analyses"
-)
+@app.post("/api/neighborhood/analyze", response_model=NeighborhoodAnalysisResponse, status_code=202)
+async def analyze_neighborhood(
+    request: NeighborhoodAnalysisRequest,
+    background_tasks: BackgroundTasks
+):
+    """Analyze a neighborhood with geospatial data"""
+    try:
+        # Get amenities data
+        amenities_data = osm_client.get_nearby_amenities(
+            address=request.address,
+            radius=request.radius_m,
+            amenity_types=request.amenity_types
+        )
+        
+        if "error" in amenities_data:
+            raise HTTPException(status_code=400, detail=amenities_data["error"])
+        
+        # Calculate walk score
+        coordinates = amenities_data.get("coordinates")
+        walk_score = None
+        if coordinates:
+            walk_score = calculate_walk_score(coordinates, amenities_data)
+        
+        # Get building footprints if requested
+        building_footprints = []
+        if request.include_buildings:
+            buildings_data = osm_client.get_building_footprints(
+                address=request.address,
+                radius=min(request.radius_m, 500)
+            )
+            if "error" not in buildings_data:
+                building_footprints = buildings_data.get("buildings", [])
+        
+        # Create analysis document
+        analysis_doc = {
+            "address": request.address,
+            "coordinates": {
+                "latitude": coordinates[0] if coordinates else 0,
+                "longitude": coordinates[1] if coordinates else 0
+            },
+            "search_radius_m": request.radius_m,
+            "amenities": amenities_data.get("amenities", {}),
+            "building_footprints": building_footprints,
+            "walk_score": walk_score,
+            "status": "processing"
+        }
+        
+        # Save to database
+        analysis_id = await create_neighborhood_analysis(analysis_doc)
+        
+        # Generate map in background if requested
+        map_url = None
+        if request.generate_map:
+            background_tasks.add_task(
+                process_map_generation,
+                analysis_id,
+                request.address,
+                amenities_data
+            )
+            map_url = f"/api/neighborhood/map/{analysis_id}"
+        else:
+            await update_analysis_status(analysis_id, "completed")
+        
+        total_amenities = sum(
+            len(items) for items in amenities_data.get("amenities", {}).values()
+        )
+        
+        return NeighborhoodAnalysisResponse(
+            analysis_id=analysis_id,
+            address=request.address,
+            status="processing" if request.generate_map else "completed",
+            walk_score=walk_score,
+            total_amenities=total_amenities,
+            amenities=amenities_data.get("amenities", {}),
+            map_url=map_url,
+            created_at=datetime.now()
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
+
+@app.get("/api/neighborhood/{analysis_id}", response_model=NeighborhoodAnalysis)
+async def get_analysis_results(analysis_id: str = Path(...)):
+    """Get neighborhood analysis results"""
+    analysis = await get_neighborhood_analysis(analysis_id)
+    if not analysis:
+        raise HTTPException(status_code=404, detail="Analysis not found")
+    return analysis
+
+@app.get("/api/neighborhood/map/{analysis_id}")
+async def get_analysis_map(analysis_id: str = Path(...)):
+    """Get interactive map for neighborhood analysis"""
+    analysis = await get_neighborhood_analysis(analysis_id)
+    if not analysis:
+        raise HTTPException(status_code=404, detail="Analysis not found")
+    
+    map_path = analysis.get("map_path")
+    if not map_path or not os.path.exists(map_path):
+        map_filename = f"neighborhood_{analysis_id.replace('-', '_')}.html"
+        map_path = os.path.join("maps", map_filename)
+        
+        if not os.path.exists(map_path):
+            raise HTTPException(status_code=404, detail="Map not available")
+    
+    return FileResponse(
+        map_path,
+        media_type="text/html",
+        filename=f"neighborhood_map_{analysis_id}.html"
+    )
+
+@app.get("/api/neighborhood/recent", response_model=List[NeighborhoodAnalysisResponse])
 async def get_recent_neighborhood_analyses(
     limit: int = Query(10, ge=1, le=50, description="Number of analyses to return")
 ):
-
+    """Get recent neighborhood analyses"""
     analyses = await get_recent_analyses(limit)
     
     response_list = []
@@ -373,29 +533,25 @@ async def get_recent_neighborhood_analyses(
         )
         
         response_list.append(NeighborhoodAnalysisResponse(
-            analysis_id=str(analysis["_id"]),
+            analysis_id=str(analysis.get("id", analysis.get("_id"))),
             address=analysis.get("address", "Unknown"),
             status=analysis.get("status", "unknown"),
             walk_score=analysis.get("walk_score"),
             total_amenities=total_amenities,
-            map_url=f"/api/neighborhood/map/{analysis['_id']}" if analysis.get("map_path") else None,
+            amenities=analysis.get("amenities", {}),
+            map_url=f"/api/neighborhood/map/{analysis.get('id', analysis.get('_id'))}" if analysis.get("map_path") else None,
             created_at=analysis.get("created_at")
         ))
     
     return response_list
 
-
-@app.get(
-    "/api/neighborhood/search",
-    summary="Search for specific amenities",
-    description="Search for specific types of amenities near an address"
-)
+@app.get("/api/neighborhood/search")
 async def search_amenities(
     address: str = Query(..., description="Target address"),
     amenity_type: str = Query(..., description="Type of amenity (restaurant, park, etc.)"),
     radius_m: int = Query(1000, ge=100, le=5000, description="Search radius in meters")
 ):
-
+    """Search for specific amenities near an address"""
     try:
         amenities_data = osm_client.get_nearby_amenities(
             address=address,
@@ -416,131 +572,50 @@ async def search_amenities(
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")
-    
-@app.get("/api/neighborhood/{analysis_id}", response_model=NeighborhoodAnalysis)
-async def get_analysis_results(analysis_id: str = Path(...)):
-    analysis = await get_neighborhood_analysis(analysis_id)
-    if not analysis:
-        raise HTTPException(status_code=404, detail="Analysis not found")
-    return analysis
 
-@app.get("/api/neighborhood/map/{analysis_id}")
-async def get_analysis_map(analysis_id: str = Path(...)):
-
-    analysis = await get_neighborhood_analysis(analysis_id)
-    if not analysis:
-        raise HTTPException(status_code=404, detail="Analysis not found")
-    
-    map_path = analysis.get("map_path")
-    if not map_path or not os.path.exists(map_path):
-        map_filename = f"neighborhood_{analysis_id.replace('-', '_')}.html"
-        map_path = os.path.join("maps", map_filename)
-        
-        if not os.path.exists(map_path):
-            raise HTTPException(status_code=404, detail="Map not available")
-    
-    return FileResponse(
-        map_path,
-        media_type="text/html",
-        filename=f"neighborhood_map_{analysis_id}.html"
-    )
-
+# ==================== STATISTICS ENDPOINT ====================
 
 @app.get("/api/stats")
 async def get_statistics():
+    """Get application statistics"""
     try:
         analysis_count = await get_analysis_count()
+        properties = await property_crud.get_all_properties()
+        
+        # Calculate stats
+        total_properties = len(properties)
+        
+        avg_price = 0
+        cities = set()
+        if properties:
+            avg_price = sum(p.get('price', 0) for p in properties) / len(properties)
+            cities = {p.get('city') for p in properties if p.get('city')}
         
         return {
-            "analyses": analysis_count,
-            "properties": len(property_crud.get_all_properties()),
+            "total_properties": total_properties,
+            "total_analyses": analysis_count,
+            "unique_cities": len(cities),
+            "average_price": round(avg_price, 2),
+            "database": "MongoDB",
             "phase": 4,
-            "status": "running"
+            "status": "running",
+            "timestamp": datetime.now().isoformat()
         }
     except Exception as e:
-        return {"error": str(e), "phase": 4}
-
-@app.post("/api/tasks/analyze-street")
-async def create_street_analysis_task(image_url: str):
-
-    try:
-   
-        import requests
-        response = requests.get(image_url)
-        if response.status_code != 200:
-            raise HTTPException(status_code=400, detail="Failed to download image")
-      
-        import uuid
-        filename = f"temp_{uuid.uuid4().hex}.jpg"
-        with open(filename, "wb") as f:
-            f.write(response.content)
-
-        task = analyze_street_image_task.delay(filename)
-        
         return {
-            "task_id": task.id,
-            "status": "PENDING",
-            "message": "Street analysis task created"
+            "error": str(e),
+            "phase": 4,
+            "timestamp": datetime.now().isoformat()
         }
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/tasks/{task_id}")
-async def get_task_status(task_id: str):
-
-    task_result = AsyncResult(task_id, app=celery_app)
-    
-    response = {
-        "task_id": task_id,
-        "status": task_result.status,
-        "result": None
-    }
-    
-    if task_result.ready():
-        response["result"] = task_result.result
-        if task_result.failed():
-            response["error"] = str(task_result.result)
-    
-    return response
-
-@app.post("/api/tasks/neighborhood/async")
-async def create_async_neighborhood_analysis(request: NeighborhoodAnalysisRequest):
-   
-    try:
-        analysis_doc = {
-            "address": request.address,
-            "search_radius_m": request.radius_m,
-            "status": "queued",
-            "created_at": datetime.now()
-        }
-        
-        analysis_id = await create_neighborhood_analysis(analysis_doc)
-        
-
-        task = analyze_neighborhood_task.delay(
-            analysis_id,
-            request.dict()
-        )
-        
-        return {
-            "task_id": task.id,
-            "analysis_id": analysis_id,
-            "status": "queued",
-            "message": "Neighborhood analysis task created"
-        }
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    
-
+# ==================== RUN SERVER ====================
 
 if __name__ == "__main__":
     import uvicorn
     
-    print("=" * 50)
-    print("GeoInsight AI API - Phase 4")
-    print("=" * 50)
+    print("\n" + "=" * 60)
+    print("🚀 GeoInsight AI API - Phase 4")
+    print("=" * 60)
     
     uvicorn.run(
         "main:app",
