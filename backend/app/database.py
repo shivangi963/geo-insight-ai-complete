@@ -7,9 +7,10 @@ import asyncio
 load_dotenv()
 
 class Database:
-    """MongoDB Database Manager"""
+    """MongoDB Database Manager - FIXED VERSION"""
     client = None
     db = None
+    _is_connected = False
     
     @classmethod
     async def connect(cls):
@@ -19,26 +20,33 @@ class Database:
             database_name = os.getenv("DATABASE_NAME", "geoinsight_ai")
             
             try:
-                cls.client = AsyncIOMotorClient(mongodb_url)
+                cls.client = AsyncIOMotorClient(mongodb_url, serverSelectionTimeoutMS=5000)
                 cls.db = cls.client[database_name]
                 
                 # Test connection
                 await cls.client.admin.command('ping')
-                print(f" Connected to MongoDB successfully!")
+                cls._is_connected = True
+                print(f"✅ Connected to MongoDB successfully!")
                 print(f"   Database: {database_name}")
                 print(f"   URL: {mongodb_url}")
                 
             except Exception as e:
-                print(f" MongoDB connection failed: {e}")
+                cls._is_connected = False
+                print(f"❌ MongoDB connection failed: {e}")
                 print("   Make sure MongoDB is running: 'net start MongoDB'")
                 raise
         
         return cls.db
     
     @classmethod
+    def is_connected(cls) -> bool:
+        """Check if database is connected - FIXED: This method was missing"""
+        return cls._is_connected
+    
+    @classmethod
     async def get_database(cls):
         """Get database instance"""
-        if cls.db is None:
+        if cls.db is None or not cls._is_connected:
             await cls.connect()
         return cls.db
     
@@ -55,7 +63,8 @@ class Database:
             cls.client.close()
             cls.client = None
             cls.db = None
-            print("Disconnected from MongoDB")
+            cls._is_connected = False
+            print("✅ Disconnected from MongoDB")
 
 async def get_database():
     """Helper function to get database"""
@@ -67,13 +76,13 @@ def get_sync_database():
     database_name = os.getenv("DATABASE_NAME", "geoinsight_ai")
     
     try:
-        client = MongoClient(mongodb_url)
+        client = MongoClient(mongodb_url, serverSelectionTimeoutMS=5000)
         # Test connection
         client.admin.command('ping')
-        print(f"Sync connection to MongoDB successful!")
+        print(f"✅ Sync connection to MongoDB successful!")
         return client[database_name]
     except Exception as e:
-        print(f" Sync MongoDB connection failed: {e}")
+        print(f"❌ Sync MongoDB connection failed: {e}")
         raise
 
 # Initialize collections on startup
