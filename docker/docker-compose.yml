@@ -1,6 +1,8 @@
 version: '3.8'
 
 services:
+  # ==================== DATABASES ====================
+  
   # MongoDB Database
   mongodb:
     image: mongo:7.0
@@ -20,6 +22,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 10s
 
   # Redis Cache & Task Queue
   redis:
@@ -28,7 +31,7 @@ services:
     restart: always
     ports:
       - "6379:6379"
-    command: redis-server --appendonly yes
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
     volumes:
       - redis_data:/data
     networks:
@@ -38,25 +41,39 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 5s
 
+  # ==================== APPLICATION SERVICES ====================
+  
   # FastAPI Backend
   backend:
     build:
-      context: .
-      dockerfile: Dockerfile.backend
+      context: ./backend
+      dockerfile: ../docker/Dockerfile.backend
     container_name: geoinsight-backend
     restart: always
     ports:
       - "8000:8000"
     environment:
+      # Database
       MONGODB_URL: mongodb://mongodb:27017
       DATABASE_NAME: geoinsight_ai
+      
+      # Redis/Celery
       REDIS_URL: redis://redis:6379/0
-      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      
+      # API Keys (IMPORTANT: Set these!)
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-your_key_here}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      
+      # Python
+      PYTHONUNBUFFERED: 1
+      PYTHONDONTWRITEBYTECODE: 1
     volumes:
       - ./backend:/app
       - ./maps:/app/maps
       - ./results:/app/results
+      - ./temp:/app/temp
     depends_on:
       mongodb:
         condition: service_healthy
@@ -64,47 +81,99 @@ services:
         condition: service_healthy
     networks:
       - geoinsight-network
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
-  # Celery Worker
+  # Celery Worker for Background Tasks
   celery-worker:
     build:
-      context: .
-      dockerfile: Dockerfile.backend
+      context: ./backend
+      dockerfile: ../docker/Dockerfile.backend
     container_name: geoinsight-celery-worker
     restart: always
     environment:
+      # Database
       MONGODB_URL: mongodb://mongodb:27017
       DATABASE_NAME: geoinsight_ai
+      
+      # Redis
       REDIS_URL: redis://redis:6379/0
-      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      
+      # API Keys
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-your_key_here}
+      
+      # Celery
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      
+      # Python
+      PYTHONUNBUFFERED: 1
     volumes:
       - ./backend:/app
       - ./results:/app/results
+      - ./maps:/app/maps
+      - ./temp:/app/temp
     depends_on:
       - redis
       - mongodb
+      - backend
     networks:
       - geoinsight-network
-    command: celery -A celery_config.celery_app worker --loglevel=info --pool=solo
+    command: celery -A celery_config.celery_app worker --loglevel=info --pool=solo --concurrency=2
+
+  # Flower - Celery Monitoring (Optional)
+  flower:
+    build:
+      context: ./backend
+      dockerfile: ../docker/Dockerfile.backend
+    container_name: geoinsight-flower
+    restart: always
+    ports:
+      - "5555:5555"
+    environment:
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+    depends_on:
+      - redis
+      - celery-worker
+    networks:
+      - geoinsight-network
+    command: celery -A celery_config.celery_app flower --port=5555
 
   # Streamlit Frontend
   frontend:
     build:
       context: .
-      dockerfile: Dockerfile.frontend
+      dockerfile: docker/Dockerfile.frontend
     container_name: geoinsight-frontend
     restart: always
     ports:
       - "8501:8501"
     environment:
+      # Backend connection
       BACKEND_URL: http://backend:8000
+      
+      # Streamlit config
+      STREAMLIT_SERVER_PORT: 8501
+      STREAMLIT_SERVER_ADDRESS: 0.0.0.0
     volumes:
       - ./ui:/app
     depends_on:
       - backend
     networks:
       - geoinsight-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+# ==================== VOLUMES ====================
 
 volumes:
   mongodb_data:
@@ -114,6 +183,11 @@ volumes:
   redis_data:
     driver: local
 
+# ==================== NETWORKS ====================
+
 networks:
   geoinsight-network:
     driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

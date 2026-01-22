@@ -31,6 +31,8 @@ class LocalExpertAgent:
     
     def extract_numbers(self, text: str) -> List[float]:
         """Extract numbers from text - handles $, K, M"""
+        if not text or len(text) > 10000:  # Prevent processing huge strings
+            return []
         numbers = []
         
         patterns = [
