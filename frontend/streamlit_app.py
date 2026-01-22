@@ -1,479 +1,315 @@
+"""
+FIXED GeoInsight AI Frontend
+- Proper task polling
+- Better error handling  
+- Real-time status updates
+- Simplified but powerful
+"""
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
 import requests
 from datetime import datetime
 import time
 
-# ==================== PAGE CONFIG ====================
+# ==================== CONFIG ====================
 
 st.set_page_config(
-    page_title="GeoInsight AI Platform",
+    page_title="GeoInsight AI",
     page_icon="🏠",
-    layout="wide",
-    initial_sidebar_state="expanded"
+    layout="wide"
 )
 
-# ==================== CUSTOM CSS ====================
+API_URL = "http://localhost:8000"
+
+# ==================== STYLES ====================
 
 st.markdown("""
 <style>
-    /* Main theme colors */
-    :root {
-        --primary-color: #1E88E5;
-        --secondary-color: #43A047;
-        --accent-color: #F57C00;
-        --background-color: #F5F7FA;
-    }
-    
-    /* Header styling */
     .main-header {
-        font-size: 2.8rem;
+        font-size: 2.5rem;
         font-weight: 700;
-        color: var(--primary-color);
+        color: #1E88E5;
         text-align: center;
         margin-bottom: 1rem;
-        text-shadow: 2px 2px 4px rgba(0,0,0,0.1);
     }
-    
-    .sub-header {
-        font-size: 1.2rem;
-        color: #666;
-        text-align: center;
-        margin-bottom: 2rem;
-    }
-    
-    /* Metric cards */
     .metric-card {
         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
         padding: 1.5rem;
-        border-radius: 15px;
+        border-radius: 10px;
         color: white;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        transition: transform 0.3s ease;
-    }
-    
-    .metric-card:hover {
-        transform: translateY(-5px);
-        box-shadow: 0 6px 12px rgba(0,0,0,0.15);
-    }
-    
-    /* Success message */
-    .success-box {
-        background-color: #d4edda;
-        border-left: 4px solid #28a745;
-        padding: 1rem;
-        border-radius: 5px;
-        margin: 1rem 0;
-    }
-    
-    /* Info box */
-    .info-box {
-        background-color: #d1ecf1;
-        border-left: 4px solid #0c5460;
-        padding: 1rem;
-        border-radius: 5px;
-        margin: 1rem 0;
-    }
-    
-    /* Button styling */
-    .stButton>button {
-        width: 100%;
-        border-radius: 10px;
-        height: 3rem;
-        font-weight: 600;
-        transition: all 0.3s ease;
-    }
-    
-    .stButton>button:hover {
-        transform: scale(1.02);
-        box-shadow: 0 4px 8px rgba(0,0,0,0.2);
-    }
-    
-    /* Tabs */
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 8px;
-    }
-    
-    .stTabs [data-baseweb="tab"] {
-        height: 50px;
-        border-radius: 10px 10px 0 0;
-        padding: 0 24px;
-        font-weight: 600;
-    }
-    
-    /* Sidebar */
-    .css-1d391kg {
-        background-color: #f8f9fa;
-    }
-    
-    /* Cards */
-    .element-container {
-        border-radius: 10px;
     }
 </style>
 """, unsafe_allow_html=True)
 
-# ==================== API CONFIGURATION ====================
+# ==================== API CLIENT ====================
 
-API_URL = "http://localhost:8000"
-
-# Initialize session state
-if 'api_url' not in st.session_state:
-    st.session_state.api_url = API_URL
-
-if 'properties_data' not in st.session_state:
-    st.session_state.properties_data = None
-
-if 'last_refresh' not in st.session_state:
-    st.session_state.last_refresh = None
-
-# ==================== HELPER FUNCTIONS ====================
-
-def fetch_data(endpoint, params=None):
-    """Fetch data from API endpoint"""
-    try:
-        response = requests.get(
-            f"{st.session_state.api_url}{endpoint}",
-            params=params,
-            timeout=10
-        )
-        if response.status_code == 200:
+class APIClient:
+    """Centralized API client with proper error handling"""
+    
+    @staticmethod
+    def get(endpoint, params=None):
+        try:
+            response = requests.get(f"{API_URL}{endpoint}", params=params, timeout=10)
+            response.raise_for_status()
             return response.json()
-        else:
-            st.error(f"API Error: {response.status_code}")
+        except requests.exceptions.ConnectionError:
+            st.error("🔌 Cannot connect to backend. Is it running on port 8000?")
             return None
-    except requests.exceptions.RequestException as e:
-        st.error(f"Connection Error: {e}")
-        return None
+        except requests.exceptions.Timeout:
+            st.error("⏱️ Request timeout")
+            return None
+        except Exception as e:
+            st.error(f"❌ Error: {e}")
+            return None
+    
+    @staticmethod
+    def post(endpoint, data):
+        try:
+            response = requests.post(f"{API_URL}{endpoint}", json=data, timeout=30)
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.ConnectionError:
+            st.error("🔌 Cannot connect to backend")
+            return None
+        except requests.exceptions.HTTPError as e:
+            st.error(f"❌ Server error: {e.response.status_code}")
+            if e.response.status_code == 400:
+                st.error(f"Details: {e.response.json().get('detail', 'Bad request')}")
+            return None
+        except Exception as e:
+            st.error(f"❌ Error: {e}")
+            return None
 
-def post_data(endpoint, data):
-    """Post data to API endpoint"""
-    try:
-        response = requests.post(
-            f"{st.session_state.api_url}{endpoint}",
-            json=data,
-            timeout=30
-        )
-        return response
-    except requests.exceptions.RequestException as e:
-        st.error(f"Connection Error: {e}")
-        return None
+api = APIClient()
+
+# ==================== TASK POLLING ====================
+
+def poll_task(task_id, max_wait=120):
+    """Poll task status until completion"""
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    
+    start_time = time.time()
+    
+    while time.time() - start_time < max_wait:
+        # Get task status
+        data = api.get(f"/api/tasks/{task_id}")
+        
+        if not data:
+            progress_bar.empty()
+            status_text.empty()
+            return None
+        
+        status = data.get('status')
+        progress = data.get('progress', 0)
+        message = data.get('message', '')
+        
+        # Update UI
+        progress_bar.progress(progress / 100)
+        
+        if status == 'pending':
+            status_text.info(f"⏳ Queued... {message}")
+        elif status == 'processing':
+            status_text.info(f"⚙️ {message}")
+        elif status == 'completed':
+            progress_bar.progress(1.0)
+            status_text.success("✅ Complete!")
+            time.sleep(0.5)
+            progress_bar.empty()
+            status_text.empty()
+            return data.get('result', {})
+        elif status == 'failed':
+            progress_bar.empty()
+            status_text.error(f"❌ Failed: {data.get('error', 'Unknown')}")
+            return None
+        
+        time.sleep(2)  # Poll every 2 seconds
+    
+    # Timeout
+    progress_bar.empty()
+    status_text.warning(f"⏱️ Timeout. Task ID: {task_id}")
+    return None
 
 # ==================== SIDEBAR ====================
 
 with st.sidebar:
-    st.image("https://img.icons8.com/fluency/96/000000/city.png", width=80)
+    st.image("https://img.icons8.com/fluency/96/city.png", width=80)
     st.title("⚙️ Settings")
     
-    # API Configuration
-    st.subheader("🔌 API Configuration")
-    api_url_input = st.text_input(
-        "Backend URL",
-        value=st.session_state.api_url,
-        help="URL of your FastAPI backend"
-    )
-    
-    if api_url_input != st.session_state.api_url:
-        st.session_state.api_url = api_url_input
-    
-    # Test API Connection
+    # Connection test
     if st.button("🔍 Test Connection", use_container_width=True):
-        with st.spinner("Testing connection..."):
-            health = fetch_data("/health")
-            if health:
-                st.success(f"✅ Connected! Version: {health.get('version', 'unknown')}")
-            else:
-                st.error("❌ Cannot connect to API")
+        health = api.get("/health")
+        if health:
+            st.success(f"✅ Connected v{health.get('version')}")
+        else:
+            st.error("❌ Backend offline")
     
     st.divider()
     
-    # Refresh Data
-    if st.button("🔄 Refresh Data", use_container_width=True, type="primary"):
-        st.session_state.properties_data = None
-        st.session_state.last_refresh = datetime.now()
-        st.rerun()
-    
-    if st.session_state.last_refresh:
-        st.caption(f"Last refresh: {st.session_state.last_refresh.strftime('%H:%M:%S')}")
-    
-    st.divider()
-    
-    # Quick Stats
-    st.subheader("📊 Quick Stats")
-    stats = fetch_data("/api/stats")
+    # Stats
+    st.subheader("📊 Stats")
+    stats = api.get("/api/stats")
     if stats:
         st.metric("Properties", stats.get('total_properties', 0))
         st.metric("Analyses", stats.get('total_analyses', 0))
-        st.metric("Cities", stats.get('unique_cities', 0))
-    
-    st.divider()
-    
-    # Info
-    st.info("""
-    **💡 Quick Guide:**
-    1. View properties in Browse tab
-    2. Add new properties in Add Property tab
-    3. Analyze neighborhoods in Analysis tab
-    4. Ask AI questions in AI Assistant tab
-    """)
+        
+        if stats.get('celery_enabled'):
+            st.success("✅ Async enabled")
+        else:
+            st.warning("⚠️ Sync mode")
 
-# ==================== MAIN HEADER ====================
+# ==================== HEADER ====================
 
-st.markdown('<h1 class="main-header">🏠 GeoInsight AI Platform</h1>', unsafe_allow_html=True)
-st.markdown('<p class="sub-header">AI-Powered Real Estate Intelligence & Neighborhood Analysis</p>', unsafe_allow_html=True)
+st.markdown('<h1 class="main-header">🏠 GeoInsight AI</h1>', unsafe_allow_html=True)
+st.markdown('<p style="text-align: center; color: #666;">AI-Powered Real Estate Intelligence</p>', unsafe_allow_html=True)
 
 # ==================== TABS ====================
 
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
-    "🏘️ Browse Properties",
-    "➕ Add Property", 
-    "🗺️ Neighborhood Analysis",
+tab1, tab2, tab3, tab4 = st.tabs([
+    "🏘️ Properties",
+    "🗺️ Analysis",
     "🤖 AI Assistant",
-    "📈 Analytics Dashboard"
+    "📊 Dashboard"
 ])
 
-# ==================== TAB 1: BROWSE PROPERTIES ====================
+# ==================== TAB 1: PROPERTIES ====================
 
 with tab1:
-    st.header("🏘️ Property Listings")
+    st.header("🏘️ Property Management")
     
-    # Fetch properties
-    if st.session_state.properties_data is None:
-        with st.spinner("Loading properties..."):
-            st.session_state.properties_data = fetch_data("/api/properties")
+    # Sub-tabs
+    prop_tab1, prop_tab2 = st.tabs(["Browse", "Add New"])
     
-    properties_data = st.session_state.properties_data
-    
-    if properties_data:
-        df = pd.DataFrame(properties_data)
+    with prop_tab1:
+        # Fetch properties
+        properties = api.get("/api/properties")
         
-        # Top metrics
-        col1, col2, col3, col4 = st.columns(4)
-        
-        with col1:
-            st.metric("📍 Total Properties", len(df), delta=None)
-        
-        with col2:
-            avg_price = df['price'].mean() if 'price' in df.columns else 0
-            st.metric("💰 Avg Price", f"${avg_price:,.0f}", delta=None)
-        
-        with col3:
-            avg_sqft = df['square_feet'].mean() if 'square_feet' in df.columns else 0
-            st.metric("📏 Avg Size", f"{avg_sqft:,.0f} sq ft", delta=None)
-        
-        with col4:
-            cities = df['city'].nunique() if 'city' in df.columns else 0
-            st.metric("🌆 Cities", cities, delta=None)
-        
-        st.divider()
-        
-        # Filters
-        st.subheader("🔍 Filter Properties")
-        
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            if 'city' in df.columns:
-                cities = ['All'] + sorted(df['city'].unique().tolist())
-                selected_city = st.selectbox("City", cities)
-            else:
-                selected_city = 'All'
-        
-        with col2:
-            if 'bedrooms' in df.columns:
-                bedrooms = ['All'] + sorted(df['bedrooms'].dropna().unique().tolist())
-                selected_beds = st.selectbox("Bedrooms", bedrooms)
-            else:
-                selected_beds = 'All'
-        
-        with col3:
-            if 'property_type' in df.columns:
-                prop_types = ['All'] + sorted(df['property_type'].dropna().unique().tolist())
-                selected_type = st.selectbox("Type", prop_types)
-            else:
-                selected_type = 'All'
-        
-        # Apply filters
-        filtered_df = df.copy()
-        
-        if selected_city != 'All':
-            filtered_df = filtered_df[filtered_df['city'] == selected_city]
-        
-        if selected_beds != 'All':
-            filtered_df = filtered_df[filtered_df['bedrooms'] == selected_beds]
-        
-        if selected_type != 'All':
-            filtered_df = filtered_df[filtered_df['property_type'] == selected_type]
-        
-        # Price range slider
-        if 'price' in filtered_df.columns and not filtered_df.empty:
-            min_price = int(filtered_df['price'].min())
-            max_price = int(filtered_df['price'].max())
+        if properties:
+            df = pd.DataFrame(properties)
             
-            if min_price < max_price:
-                price_range = st.slider(
-                    "💵 Price Range",
-                    min_value=min_price,
-                    max_value=max_price,
-                    value=(min_price, max_price),
-                    format="$%d"
-                )
-                filtered_df = filtered_df[
-                    (filtered_df['price'] >= price_range[0]) &
-                    (filtered_df['price'] <= price_range[1])
-                ]
-        
-        st.divider()
-        
-        # Display properties
-        if not filtered_df.empty:
-            st.success(f"✨ Showing {len(filtered_df)} of {len(df)} properties")
+            # Metrics
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Total", len(df))
+            with col2:
+                if 'price' in df.columns:
+                    st.metric("Avg Price", f"${df['price'].mean():,.0f}")
+            with col3:
+                if 'square_feet' in df.columns:
+                    st.metric("Avg Size", f"{df['square_feet'].mean():,.0f} sqft")
+            with col4:
+                if 'city' in df.columns:
+                    st.metric("Cities", df['city'].nunique())
             
-            # Property cards
-            for idx, row in filtered_df.iterrows():
-                with st.container():
-                    col1, col2, col3 = st.columns([2, 2, 1])
-                    
+            st.divider()
+            
+            # Filters
+            col1, col2 = st.columns(2)
+            with col1:
+                if 'city' in df.columns:
+                    cities = ['All'] + sorted(df['city'].dropna().unique().tolist())
+                    city_filter = st.selectbox("Filter by City", cities)
+            
+            with col2:
+                if 'price' in df.columns and len(df) > 0:
+                    min_p = int(df['price'].min())
+                    max_p = int(df['price'].max())
+                    if min_p < max_p:
+                        price_range = st.slider("Price Range", min_p, max_p, (min_p, max_p))
+                        df = df[(df['price'] >= price_range[0]) & (df['price'] <= price_range[1])]
+            
+            if city_filter != 'All':
+                df = df[df['city'] == city_filter]
+            
+            st.success(f"Showing {len(df)} properties")
+            
+            # Display
+            for idx, row in df.iterrows():
+                with st.expander(f"🏠 {row.get('address', 'N/A')} - ${row.get('price', 0):,.0f}"):
+                    col1, col2 = st.columns(2)
                     with col1:
-                        st.markdown(f"### 🏠 {row.get('address', 'N/A')}")
-                        st.caption(f"📍 {row.get('city', 'N/A')}, {row.get('state', 'N/A')}")
-                    
+                        st.write(f"**City:** {row.get('city', 'N/A')}, {row.get('state', 'N/A')}")
+                        st.write(f"**Type:** {row.get('property_type', 'N/A')}")
                     with col2:
-                        st.markdown(f"**💰 Price:** ${row.get('price', 0):,.0f}")
-                        st.markdown(f"**🛏️ Beds:** {row.get('bedrooms', 'N/A')} | **🛁 Baths:** {row.get('bathrooms', 'N/A')}")
-                        st.markdown(f"**📏 Size:** {row.get('square_feet', 'N/A'):,} sq ft")
-                    
-                    with col3:
-                        if st.button("📋 Details", key=f"detail_{idx}", use_container_width=True):
-                            st.session_state.selected_property = row
-                            st.info(f"Property ID: {row.get('id', 'N/A')}")
-                    
-                    st.divider()
+                        st.write(f"**Beds:** {row.get('bedrooms', 'N/A')} | **Baths:** {row.get('bathrooms', 'N/A')}")
+                        st.write(f"**Size:** {row.get('square_feet', 'N/A'):,} sqft")
         else:
-            st.warning("No properties match your filters. Try adjusting your criteria.")
+            st.warning("No properties loaded")
     
-    else:
-        st.error("""
-        ⚠️ **Cannot load properties**
+    with prop_tab2:
+        st.subheader("Add New Property")
         
-        Please ensure:
-        1. Backend API is running on http://localhost:8000
-        2. MongoDB is running and connected
-        3. Try clicking 'Test Connection' in the sidebar
-        """)
-
-# ==================== TAB 2: ADD PROPERTY ====================
-
-with tab2:
-    st.header("➕ Add New Property")
-    
-    st.markdown("""
-    Fill in the property details below to add a new listing to the database.
-    """)
-    
-    with st.form("add_property_form"):
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            address = st.text_input("🏠 Address *", placeholder="123 Main St")
-            city = st.text_input("🌆 City *", placeholder="San Francisco")
-            state = st.text_input("📍 State *", placeholder="CA")
-            zip_code = st.text_input("📮 ZIP Code *", placeholder="94105")
-        
-        with col2:
-            price = st.number_input("💰 Price ($) *", min_value=0, value=500000, step=10000)
-            bedrooms = st.number_input("🛏️ Bedrooms *", min_value=0, value=3, step=1)
-            bathrooms = st.number_input("🛁 Bathrooms *", min_value=0.0, value=2.0, step=0.5)
-            square_feet = st.number_input("📏 Square Feet *", min_value=0, value=1500, step=100)
-        
-        col3, col4 = st.columns(2)
-        
-        with col3:
-            property_type = st.selectbox(
-                "🏘️ Property Type *",
-                ["Single Family", "Condo", "Apartment", "Townhouse", "Multi-Family"]
-            )
-        
-        with col4:
-            st.write("📍 Coordinates (Optional)")
-            latitude = st.number_input("Latitude", value=37.7749, format="%.6f")
-            longitude = st.number_input("Longitude", value=-122.4194, format="%.6f")
-        
-        submitted = st.form_submit_button("✅ Add Property", use_container_width=True, type="primary")
-        
-        if submitted:
-            if not all([address, city, state, zip_code]):
-                st.error("❌ Please fill in all required fields (marked with *)")
-            else:
-                property_data = {
-                    "address": address,
-                    "city": city,
-                    "state": state,
-                    "zip_code": zip_code,
-                    "price": price,
-                    "bedrooms": int(bedrooms),
-                    "bathrooms": float(bathrooms),
-                    "square_feet": int(square_feet),
-                    "property_type": property_type,
-                    "latitude": latitude,
-                    "longitude": longitude
-                }
-                
-                with st.spinner("Adding property..."):
-                    response = post_data("/api/properties", property_data)
+        with st.form("add_property"):
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                address = st.text_input("Address *")
+                city = st.text_input("City *")
+                state = st.text_input("State *")
+                zip_code = st.text_input("ZIP *")
+            
+            with col2:
+                price = st.number_input("Price ($) *", min_value=0, value=300000, step=10000)
+                bedrooms = st.number_input("Bedrooms *", min_value=0, value=3, step=1)
+                bathrooms = st.number_input("Bathrooms *", min_value=0.0, value=2.0, step=0.5)
+                square_feet = st.number_input("Square Feet *", min_value=0, value=1500, step=100)
+            
+            property_type = st.selectbox("Type *", ["Single Family", "Condo", "Apartment", "Townhouse"])
+            
+            submitted = st.form_submit_button("➕ Add Property", type="primary", use_container_width=True)
+            
+            if submitted:
+                if all([address, city, state, zip_code]):
+                    data = {
+                        "address": address,
+                        "city": city,
+                        "state": state,
+                        "zip_code": zip_code,
+                        "price": price,
+                        "bedrooms": int(bedrooms),
+                        "bathrooms": float(bathrooms),
+                        "square_feet": int(square_feet),
+                        "property_type": property_type,
+                        "latitude": 0.0,
+                        "longitude": 0.0
+                    }
                     
-                    if response and response.status_code == 201:
-                        result = response.json()
-                        st.success(f"""
-                        ✅ **Property added successfully!**
-                        
-                        - **ID:** {result.get('id')}
-                        - **Address:** {result.get('address')}
-                        - **Price:** ${result.get('price'):,}
-                        """)
-                        
-                        # Clear cached data to show new property
-                        st.session_state.properties_data = None
-                        
+                    result = api.post("/api/properties", data)
+                    if result:
+                        st.success(f"✅ Property added! ID: {result.get('id')}")
                         time.sleep(2)
                         st.rerun()
-                    else:
-                        st.error("❌ Failed to add property. Check API connection.")
+                else:
+                    st.error("❌ Fill all required fields")
 
-# ==================== TAB 3: NEIGHBORHOOD ANALYSIS ====================
+# ==================== TAB 2: ANALYSIS ====================
 
-with tab3:
+with tab2:
     st.header("🗺️ Neighborhood Analysis")
     
-    st.markdown("""
-    Analyze any location to discover nearby amenities, calculate walkability scores, 
-    and visualize the neighborhood on an interactive map.
-    """)
+    st.markdown("Analyze any location for amenities, walkability, and neighborhood insights.")
     
-    col1, col2 = st.columns([2, 1])
+    # Input
+    address = st.text_input(
+        "📍 Enter Address",
+        placeholder="e.g., Manipal, Karnataka, India",
+        help="Full address gives best results"
+    )
+    
+    col1, col2 = st.columns(2)
     
     with col1:
-        analysis_address = st.text_input(
-            "📍 Enter Address",
-            placeholder="e.g., Manipal, Karnataka, India",
-            help="Enter a complete address for best results"
-        )
+        radius = st.slider("🔍 Search Radius (m)", 500, 3000, 1000, 100)
     
     with col2:
-        radius = st.slider(
-            "🔍 Search Radius (meters)",
-            min_value=500,
-            max_value=3000,
-            value=1000,
-            step=100
-        )
+        generate_map = st.checkbox("🗺️ Generate Map", value=True)
     
-    # Amenity selection
-    st.subheader("🎯 Select Amenities to Find")
+    # Amenities
+    st.subheader("🎯 Select Amenities")
     
-    col1, col2, col3, col4 = st.columns(4)
+    amenity_cols = st.columns(4)
+    amenities_selected = []
     
     amenity_options = {
         "🍽️ Restaurants": "restaurant",
@@ -481,251 +317,211 @@ with tab3:
         "🏫 Schools": "school",
         "🏥 Hospitals": "hospital",
         "🌳 Parks": "park",
-        "🛒 Supermarkets": "supermarket",
+        "🛒 Markets": "supermarket",
         "🏦 Banks": "bank",
-        "💊 Pharmacies": "pharmacy"
+        "💊 Pharmacy": "pharmacy"
     }
     
-    selected_amenities = []
+    for idx, (label, value) in enumerate(amenity_options.items()):
+        with amenity_cols[idx % 4]:
+            if st.checkbox(label, value=(value in ['restaurant', 'cafe', 'school'])):
+                amenities_selected.append(value)
     
-    with col1:
-        if st.checkbox("🍽️ Restaurants", value=True):
-            selected_amenities.append("restaurant")
-        if st.checkbox("☕ Cafes", value=True):
-            selected_amenities.append("cafe")
-    
-    with col2:
-        if st.checkbox("🏫 Schools", value=True):
-            selected_amenities.append("school")
-        if st.checkbox("🏥 Hospitals", value=False):
-            selected_amenities.append("hospital")
-    
-    with col3:
-        if st.checkbox("🌳 Parks", value=False):
-            selected_amenities.append("park")
-        if st.checkbox("🛒 Supermarkets", value=False):
-            selected_amenities.append("supermarket")
-    
-    with col4:
-        if st.checkbox("🏦 Banks", value=False):
-            selected_amenities.append("bank")
-        if st.checkbox("💊 Pharmacies", value=False):
-            selected_amenities.append("pharmacy")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        generate_map = st.checkbox("🗺️ Generate Interactive Map", value=True)
-    
-    with col2:
-        include_buildings = st.checkbox("🏢 Include Building Data", value=True)
-    
-    if st.button("🚀 Start Analysis", use_container_width=True, type="primary"):
-        if not analysis_address:
-            st.error("❌ Please enter an address")
-        elif not selected_amenities:
-            st.error("❌ Please select at least one amenity type")
+    # Submit
+    if st.button("🚀 Start Analysis", type="primary", use_container_width=True):
+        if not address:
+            st.error("❌ Enter an address")
+        elif not amenities_selected:
+            st.error("❌ Select at least one amenity")
         else:
-            with st.spinner("🔍 Analyzing neighborhood... This may take 10-30 seconds"):
-                analysis_data = {
-                    "address": analysis_address,
+            st.divider()
+            
+            with st.spinner("🔄 Creating analysis..."):
+                response = api.post("/api/neighborhood/analyze", {
+                    "address": address,
                     "radius_m": radius,
-                    "amenity_types": selected_amenities,
-                    "include_buildings": include_buildings,
+                    "amenity_types": amenities_selected,
+                    "include_buildings": False,
                     "generate_map": generate_map
-                }
+                })
                 
-                response = post_data("/api/neighborhood/analyze", analysis_data)
-                
-                if response and response.status_code == 202:
-                    result = response.json()
+                if response:
+                    analysis_id = response.get('analysis_id')
+                    task_id = response.get('task_id')
                     
-                    # Display results
-                    st.success("✅ Analysis Complete!")
+                    st.success(f"✅ Analysis queued! ID: {analysis_id}")
+                    st.info(f"Task: {task_id}")
                     
-                    col1, col2, col3 = st.columns(3)
+                    # Poll for completion
+                    st.subheader("⚙️ Processing")
                     
-                    with col1:
-                        walk_score = result.get('walk_score', 0)
-                        st.metric(
-                            "🚶 Walk Score",
-                            f"{walk_score:.1f}/100",
-                            delta="Good" if walk_score > 70 else "Fair" if walk_score > 50 else "Low"
-                        )
+                    result = poll_task(task_id)
                     
-                    with col2:
-                        st.metric("📍 Total Amenities", result.get('total_amenities', 0))
-                    
-                    with col3:
-                        st.metric("📊 Analysis Status", result.get('status', 'unknown'))
-                    
-                    # Show amenities breakdown
-                    st.subheader("🎯 Amenities Found")
-                    
-                    amenities = result.get('amenities', {})
-                    if amenities:
-                        cols = st.columns(4)
-                        idx = 0
-                        
-                        for amenity_type, items in amenities.items():
-                            with cols[idx % 4]:
-                                st.markdown(f"""
-                                **{amenity_type.title()}**  
-                                🔢 {len(items)} found
-                                """)
-                                
-                                if items:
-                                    with st.expander("View Details"):
-                                        for item in items[:5]:
-                                            st.write(f"• {item.get('name', 'Unknown')} ({item.get('distance_km', 0):.2f} km)")
+                    if result:
+                        # Fetch full results
+                        with st.spinner("📥 Loading results..."):
+                            full_data = api.get(f"/api/neighborhood/{analysis_id}")
                             
-                            idx += 1
-                    
-                    # Map link
-                    if result.get('map_url'):
-                        st.divider()
-                        map_url = f"{st.session_state.api_url}{result['map_url']}"
-                        st.markdown(f"""
-                        ### 🗺️ Interactive Map
-                        
-                        Your interactive neighborhood map is ready!
-                        
-                        [🔗 Open Interactive Map]({map_url})
-                        """)
-                        
-                        # Embed map in iframe
-                        st.components.v1.iframe(map_url, height=600, scrolling=True)
-                    
-                    # Save analysis ID for later reference
-                    st.session_state.last_analysis_id = result.get('analysis_id')
-                    
-                else:
-                    st.error("❌ Analysis failed. Please check your API connection and try again.")
+                            if full_data:
+                                st.divider()
+                                st.subheader("📊 Results")
+                                
+                                # Metrics
+                                col1, col2, col3 = st.columns(3)
+                                
+                                with col1:
+                                    walk_score = full_data.get('walk_score', 0)
+                                    st.metric("🚶 Walk Score", f"{walk_score:.1f}/100")
+                                
+                                with col2:
+                                    amenities = full_data.get('amenities', {})
+                                    total = sum(len(items) for items in amenities.values())
+                                    st.metric("📍 Amenities", total)
+                                
+                                with col3:
+                                    st.metric("📊 Status", full_data.get('status', 'N/A'))
+                                
+                                # Amenities breakdown
+                                st.divider()
+                                st.subheader("🎯 Amenities Found")
+                                
+                                if amenities:
+                                    amenity_counts = {k: len(v) for k, v in amenities.items() if v}
+                                    
+                                    if amenity_counts:
+                                        fig = px.bar(
+                                            x=list(amenity_counts.keys()),
+                                            y=list(amenity_counts.values()),
+                                            labels={'x': 'Type', 'y': 'Count'},
+                                            title="Amenity Distribution"
+                                        )
+                                        st.plotly_chart(fig, use_container_width=True)
+                                    
+                                    # Detailed list
+                                    cols = st.columns(3)
+                                    for idx, (atype, items) in enumerate(amenities.items()):
+                                        if items:
+                                            with cols[idx % 3]:
+                                                with st.expander(f"{atype.title()} ({len(items)})"):
+                                                    for item in items[:5]:
+                                                        st.write(f"• {item.get('name', 'Unknown')} - {item.get('distance_km', 0):.2f}km")
+                                
+                                # Map
+                                if generate_map and full_data.get('map_path'):
+                                    st.divider()
+                                    st.subheader("🗺️ Interactive Map")
+                                    map_url = f"{API_URL}/api/neighborhood/{analysis_id}/map"
+                                    st.components.v1.iframe(map_url, height=600)
+                    else:
+                        st.error("❌ Analysis failed or timeout")
     
     # Recent analyses
     st.divider()
     st.subheader("📜 Recent Analyses")
     
-    recent_analyses = fetch_data("/api/neighborhood/recent", params={"limit": 5})
-    
-    if recent_analyses:
-        for analysis in recent_analyses:
-            with st.expander(f"📍 {analysis.get('address', 'Unknown')} - {analysis.get('created_at', '')[:10]}"):
-                col1, col2, col3 = st.columns(3)
-                
-                with col1:
-                    st.write(f"**Walk Score:** {analysis.get('walk_score', 'N/A')}")
-                
-                with col2:
-                    st.write(f"**Amenities:** {analysis.get('total_amenities', 0)}")
-                
-                with col3:
-                    st.write(f"**Status:** {analysis.get('status', 'unknown')}")
-                
-                if analysis.get('map_url'):
-                    map_link = f"{st.session_state.api_url}{analysis['map_url']}"
-                    st.markdown(f"[🗺️ View Map]({map_link})")
+    recent = api.get("/api/neighborhood/recent", params={"limit": 5})
+    if recent:
+        for a in recent:
+            with st.expander(f"📍 {a.get('address', 'Unknown')}"):
+                st.write(f"Status: {a.get('status', 'unknown')}")
+                st.write(f"Walk Score: {a.get('walk_score', 'N/A')}")
 
-# ==================== TAB 4: AI ASSISTANT ====================
+# ==================== TAB 3: AI ASSISTANT ====================
 
-with tab4:
+with tab3:
     st.header("🤖 AI Real Estate Assistant")
     
-    st.markdown("""
-    Ask me anything about real estate investments, property valuations, rental analysis, or market trends!
-    I can help you make data-driven decisions.
-    """)
+    st.markdown("Ask questions about investments, prices, rentals, and market analysis.")
     
-    # Example queries
+    # Examples
     with st.expander("💡 Example Questions"):
         st.markdown("""
-        - Calculate ROI for a $300,000 property with $2,000 monthly rent
-        - Is $450,000 a good price for a 3-bedroom house?
-        - What's the expected rental income for a $500k property?
-        - Investment analysis: $750k house, $3500 rent, 20% down payment
-        - Should I invest in a property with 4% rental yield?
+        - Calculate ROI for $300,000 property with $2,000 monthly rent
+        - Is $450,000 a good price for a 3-bedroom?
+        - Investment analysis: $500K house, $2,800 rent, 20% down
+        - Fair rent for $400K property?
         """)
     
     # Query input
-    user_query = st.text_area(
+    query = st.text_area(
         "💬 Your Question",
-        placeholder="e.g., Calculate investment returns for $300k property with $2000 monthly rent",
+        placeholder="e.g., Calculate ROI for $300k property with $2k rent",
         height=100
     )
     
     col1, col2 = st.columns([3, 1])
     
     with col1:
-        ask_button = st.button("🚀 Ask AI Assistant", use_container_width=True, type="primary")
+        ask = st.button("🚀 Ask AI", type="primary", use_container_width=True)
     
     with col2:
         if st.button("🗑️ Clear", use_container_width=True):
             st.rerun()
     
-    if ask_button and user_query:
-        with st.spinner("🤔 AI is thinking..."):
-            response = post_data("/api/agent/query", {"query": user_query})
+    if ask and query:
+        with st.spinner("🤔 AI thinking..."):
+            response = api.post("/api/agent/query", {"query": query})
             
-            if response and response.status_code == 200:
-                result = response.json()
+            if response and response.get('success'):
+                st.success("✅ Analysis Complete")
                 
-                st.success("✅ Analysis Complete!")
-                
-                # Display answer
                 st.markdown("### 💡 AI Response")
-                
-                answer = result.get('answer', 'No response available')
-                st.markdown(answer)
+                st.markdown(response.get('answer', 'No response'))
                 
                 # Show calculations if available
-                if 'calculations' in result:
+                if 'calculations' in response:
                     st.divider()
-                    st.markdown("### 📊 Detailed Calculations")
+                    st.subheader("📊 Calculations")
                     
-                    calc = result['calculations']
+                    calc = response['calculations']
+                    cols = st.columns(4)
                     
-                    cols = st.columns(len(calc))
-                    for idx, (key, value) in enumerate(calc.items()):
-                        with cols[idx]:
-                            st.metric(
-                                key.replace('_', ' ').title(),
-                                f"{value:,.2f}" if isinstance(value, (int, float)) else str(value)
-                            )
+                    key_metrics = [
+                        ('price', 'Price'),
+                        ('monthly_rent', 'Rent'),
+                        ('monthly_cash_flow', 'Cash Flow'),
+                        ('cash_on_cash_roi', 'ROI %')
+                    ]
+                    
+                    for idx, (key, label) in enumerate(key_metrics):
+                        if key in calc:
+                            with cols[idx]:
+                                value = calc[key]
+                                st.metric(label, f"${value:,.0f}" if 'price' in key or 'flow' in key or 'rent' in key else f"{value:.1f}%")
                 
-                # Show confidence
-                if 'confidence' in result:
-                    confidence = result['confidence']
-                    st.progress(confidence)
-                    st.caption(f"Confidence: {confidence*100:.0f}%")
-                
-            else:
-                st.error("❌ Failed to get response from AI assistant")
+                # Confidence
+                if 'confidence' in response:
+                    conf = response['confidence']
+                    st.progress(conf)
+                    st.caption(f"Confidence: {conf*100:.0f}%")
 
-# ==================== TAB 5: ANALYTICS ====================
+# ==================== TAB 4: DASHBOARD ====================
 
-with tab5:
-    st.header("📈 Analytics Dashboard")
+with tab4:
+    st.header("📊 Analytics Dashboard")
     
-    if st.session_state.properties_data:
-        df = pd.DataFrame(st.session_state.properties_data)
+    properties = api.get("/api/properties")
+    
+    if properties:
+        df = pd.DataFrame(properties)
         
-        # Key metrics
+        # Metrics
         col1, col2, col3, col4 = st.columns(4)
         
         with col1:
-            st.metric("📊 Total Properties", len(df))
+            st.metric("Total Properties", len(df))
         
         with col2:
             if 'price' in df.columns:
-                st.metric("💰 Total Value", f"${df['price'].sum():,.0f}")
+                st.metric("Total Value", f"${df['price'].sum():,.0f}")
         
         with col3:
             if 'price' in df.columns:
-                st.metric("📈 Avg Price", f"${df['price'].mean():,.0f}")
+                st.metric("Avg Price", f"${df['price'].mean():,.0f}")
         
         with col4:
-            if 'price' in df.columns:
-                st.metric("📉 Median Price", f"${df['price'].median():,.0f}")
+            if 'city' in df.columns:
+                st.metric("Cities", df['city'].nunique())
         
         st.divider()
         
@@ -735,74 +531,19 @@ with tab5:
         with col1:
             if 'price' in df.columns and len(df) > 1:
                 st.subheader("💰 Price Distribution")
-                fig = px.histogram(
-                    df,
-                    x='price',
-                    nbins=20,
-                    title="Property Price Distribution",
-                    color_discrete_sequence=['#1E88E5']
-                )
-                fig.update_layout(showlegend=False)
+                fig = px.histogram(df, x='price', nbins=20, title="Property Prices")
                 st.plotly_chart(fig, use_container_width=True)
         
         with col2:
             if 'city' in df.columns and len(df['city'].unique()) > 1:
-                st.subheader("🌆 Properties by City")
+                st.subheader("🌆 By City")
                 city_counts = df['city'].value_counts()
-                fig = px.pie(
-                    values=city_counts.values,
-                    names=city_counts.index,
-                    title="Property Distribution by City"
-                )
+                fig = px.pie(values=city_counts.values, names=city_counts.index)
                 st.plotly_chart(fig, use_container_width=True)
-        
-        st.divider()
-        
-        # More charts
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            if 'bedrooms' in df.columns:
-                st.subheader("🛏️ Bedrooms Distribution")
-                bed_counts = df['bedrooms'].value_counts().sort_index()
-                fig = px.bar(
-                    x=bed_counts.index,
-                    y=bed_counts.values,
-                    labels={'x': 'Bedrooms', 'y': 'Count'},
-                    color=bed_counts.values,
-                    color_continuous_scale='blues'
-                )
-                st.plotly_chart(fig, use_container_width=True)
-        
-        with col2:
-            if 'square_feet' in df.columns and 'price' in df.columns:
-                st.subheader("📏 Price per Sq Ft")
-                df['price_per_sqft'] = df['price'] / df['square_feet']
-                fig = px.scatter(
-                    df,
-                    x='square_feet',
-                    y='price',
-                    size='price_per_sqft',
-                    color='city' if 'city' in df.columns else None,
-                    hover_data=['address'],
-                    title="Property Size vs Price"
-                )
-                st.plotly_chart(fig, use_container_width=True)
-    
     else:
-        st.info("📊 Load property data in the Browse Properties tab to view analytics")
+        st.info("No data available")
 
 # ==================== FOOTER ====================
 
 st.divider()
-
-col1, col2, col3 = st.columns(3)
-
-with col1:
-    st.caption(f"🔌 API: {st.session_state.api_url}")
-
-with col2:
-    st.caption(f"🕐 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-
-with col3:
-    st.caption("🚀 GeoInsight AI v4.0")
+st.caption(f"🚀 GeoInsight AI v3.0 | API: {API_URL} | {datetime.now().strftime('%Y-%m-%d %H:%M')}")
