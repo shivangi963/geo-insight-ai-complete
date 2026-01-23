@@ -166,11 +166,12 @@ st.markdown('<p style="text-align: center; color: #666;">AI-Powered Real Estate 
 
 # ==================== TABS ====================
 
-tab1, tab2, tab3, tab4 = st.tabs([
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "🏘️ Properties",
     "🗺️ Analysis",
     "🤖 AI Assistant",
-    "📊 Dashboard"
+    "📊 Dashboard",
+    "📸 Image Analysis"
 ])
 
 # ==================== TAB 1: PROPERTIES ====================
@@ -542,6 +543,287 @@ with tab4:
                 st.plotly_chart(fig, use_container_width=True)
     else:
         st.info("No data available")
+
+
+with tab5:
+    st.header("📸 Image Analysis")
+    
+    st.markdown("""
+    Upload street scenes or satellite images for AI-powered analysis:
+    - **Street Scene**: Detect cars, pedestrians, buildings, traffic
+    - **Green Space**: Calculate vegetation coverage from satellite imagery
+    """)
+    
+    # Analysis type selection
+    analysis_type = st.radio(
+        "🔬 Analysis Type",
+        ["object_detection", "green_space"],
+        format_func=lambda x: "🚗 Street Scene (Object Detection)" if x == "object_detection" else "🌳 Green Space Calculator",
+        horizontal=True
+    )
+    
+    # File uploader
+    uploaded_file = st.file_uploader(
+        "📤 Upload Image",
+        type=['jpg', 'jpeg', 'png'],
+        help="Upload a street scene photo or satellite image"
+    )
+    
+    # Preview uploaded image
+    if uploaded_file:
+        col1, col2 = st.columns([2, 1])
+        
+        with col1:
+            st.image(uploaded_file, caption="Uploaded Image", use_column_width=True)
+        
+        with col2:
+            st.info(f"**Filename:** {uploaded_file.name}")
+            st.info(f"**Size:** {uploaded_file.size / 1024:.1f} KB")
+            st.info(f"**Type:** {uploaded_file.type}")
+    
+    # Analyze button
+    if uploaded_file and st.button("🚀 Analyze Image", type="primary", use_container_width=True):
+        
+        st.divider()
+        
+        # Upload to API
+        with st.spinner("📤 Uploading image..."):
+            try:
+                # Prepare file
+                files = {
+                    'file': (uploaded_file.name, uploaded_file.getvalue(), uploaded_file.type)
+                }
+                
+                params = {
+                    'analysis_type': analysis_type
+                }
+                
+                # Upload
+                response = requests.post(
+                    f"{API_URL}/api/analysis/image",
+                    files=files,
+                    params=params,
+                    timeout=30
+                )
+                
+                if response.status_code == 202:
+                    result = response.json()
+                    task_id = result.get('task_id')
+                    
+                    st.success(f"✅ Upload successful! Task ID: {task_id}")
+                    
+                    # Poll for results
+                    st.subheader("⚙️ Processing Image")
+                    
+                    progress_bar = st.progress(0)
+                    status_text = st.empty()
+                    
+                    max_wait = 120
+                    start_time = time.time()
+                    
+                    while time.time() - start_time < max_wait:
+                        # Get status
+                        status_response = requests.get(f"{API_URL}/api/tasks/{task_id}")
+                        
+                        if status_response.status_code == 200:
+                            status_data = status_response.json()
+                            status_val = status_data.get('status')
+                            progress = status_data.get('progress', 0)
+                            
+                            # Update UI
+                            progress_bar.progress(progress / 100)
+                            
+                            if status_val == 'pending':
+                                status_text.info(f"⏳ Queued...")
+                            elif status_val == 'processing':
+                                status_text.info(f"⚙️ Processing... {progress}%")
+                            elif status_val == 'completed':
+                                status_text.success("✅ Analysis complete!")
+                                progress_bar.progress(1.0)
+                                
+                                # Display results
+                                st.divider()
+                                st.subheader("📊 Analysis Results")
+                                
+                                analysis_result = status_data.get('result', {})
+                                
+                                if analysis_type == "object_detection":
+                                    # Street scene results
+                                    detections = analysis_result.get('detections', [])
+                                    class_counts = analysis_result.get('class_counts', {})
+                                    
+                                    col1, col2, col3 = st.columns(3)
+                                    
+                                    with col1:
+                                        st.metric("Total Objects", len(detections))
+                                    
+                                    with col2:
+                                        st.metric("Object Types", len(class_counts))
+                                    
+                                    with col3:
+                                        if 'car' in class_counts:
+                                            st.metric("Vehicles", class_counts.get('car', 0))
+                                    
+                                    # Object breakdown
+                                    if class_counts:
+                                        st.subheader("🏷️ Objects Detected")
+                                        
+                                        # Create bar chart
+                                        import pandas as pd
+                                        df = pd.DataFrame(
+                                            list(class_counts.items()),
+                                            columns=['Object', 'Count']
+                                        )
+                                        df = df.sort_values('Count', ascending=False)
+                                        
+                                        fig = px.bar(
+                                            df,
+                                            x='Object',
+                                            y='Count',
+                                            title="Object Distribution",
+                                            color='Count'
+                                        )
+                                        st.plotly_chart(fig, use_container_width=True)
+                                        
+                                        # Detailed list
+                                        with st.expander("📋 Detailed Detections"):
+                                            for obj_class, count in sorted(class_counts.items(), key=lambda x: x[1], reverse=True):
+                                                st.write(f"**{obj_class.title()}:** {count}")
+                                    
+                                    # Annotated image
+                                    annotated_path = analysis_result.get('annotated_image_path')
+                                    if annotated_path:
+                                        st.subheader("🖼️ Annotated Image")
+                                        try:
+                                            st.image(annotated_path, caption="Detected Objects", use_column_width=True)
+                                        except:
+                                            st.info(f"Annotated image saved at: {annotated_path}")
+                                
+                                elif analysis_type == "green_space":
+                                    # Green space results
+                                    green_pct = analysis_result.get('green_space_percentage', 0)
+                                    total_pixels = analysis_result.get('total_pixels', 0)
+                                    green_pixels = analysis_result.get('green_pixels', 0)
+                                    
+                                    col1, col2, col3 = st.columns(3)
+                                    
+                                    with col1:
+                                        st.metric("🌳 Green Space", f"{green_pct:.2f}%")
+                                    
+                                    with col2:
+                                        st.metric("Green Pixels", f"{green_pixels:,}")
+                                    
+                                    with col3:
+                                        st.metric("Total Pixels", f"{total_pixels:,}")
+                                    
+                                    # Gauge chart
+                                    import plotly.graph_objects as go
+                                    
+                                    fig = go.Figure(go.Indicator(
+                                        mode="gauge+number",
+                                        value=green_pct,
+                                        title={'text': "Green Space Coverage"},
+                                        gauge={
+                                            'axis': {'range': [None, 100]},
+                                            'bar': {'color': "darkgreen"},
+                                            'steps': [
+                                                {'range': [0, 20], 'color': "lightgray"},
+                                                {'range': [20, 50], 'color': "yellow"},
+                                                {'range': [50, 100], 'color': "lightgreen"}
+                                            ],
+                                            'threshold': {
+                                                'line': {'color': "red", 'width': 4},
+                                                'thickness': 0.75,
+                                                'value': 50
+                                            }
+                                        }
+                                    ))
+                                    
+                                    st.plotly_chart(fig, use_container_width=True)
+                                    
+                                    # Interpretation
+                                    st.subheader("📋 Interpretation")
+                                    
+                                    if green_pct > 50:
+                                        st.success("✅ **Excellent green coverage!** This area has abundant vegetation and parks.")
+                                    elif green_pct > 25:
+                                        st.info("ℹ️ **Good green coverage.** Decent amount of trees and parks.")
+                                    elif green_pct > 10:
+                                        st.warning("⚠️ **Moderate green coverage.** Could benefit from more green spaces.")
+                                    else:
+                                        st.error("❌ **Low green coverage.** Limited vegetation in this area.")
+                                    
+                                    # Visualization
+                                    viz_path = analysis_result.get('visualization_path')
+                                    if viz_path:
+                                        st.subheader("🗺️ Green Space Visualization")
+                                        try:
+                                            st.image(viz_path, caption="Green Space Overlay", use_column_width=True)
+                                        except:
+                                            st.info(f"Visualization saved at: {viz_path}")
+                                
+                                break
+                            
+                            elif status_val == 'failed':
+                                status_text.error(f"❌ Analysis failed: {status_data.get('error')}")
+                                break
+                        
+                        time.sleep(2)
+                    
+                    else:
+                        st.warning("⏱️ Analysis timeout. Please try again.")
+                
+                else:
+                    st.error(f"❌ Upload failed: {response.status_code}")
+                    st.error(response.text)
+            
+            except Exception as e:
+                st.error(f"❌ Error: {e}")
+    
+    # Sample images section
+    st.divider()
+    st.subheader("📸 Sample Images")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("""
+        **🚗 Street Scene Examples:**
+        - City streets with traffic
+        - Intersection views
+        - Highway scenes
+        - Urban pedestrian areas
+        """)
+    
+    with col2:
+        st.markdown("""
+        **🌳 Green Space Examples:**
+        - Satellite images of parks
+        - Neighborhood aerial views
+        - Urban planning imagery
+        - Campus/campus areas
+        """)
+    
+    # Usage tips
+    with st.expander("💡 Tips for Best Results"):
+        st.markdown("""
+        **For Street Scene Analysis:**
+        - Use clear, well-lit images
+        - Capture from street level
+        - Include visible objects (cars, people, signs)
+        - Avoid blurry or obstructed views
+        
+        **For Green Space Analysis:**
+        - Use satellite/aerial imagery
+        - Ensure good contrast between vegetation and buildings
+        - Capture during daylight with clear visibility
+        - Higher resolution images work better
+        
+        **Technical Requirements:**
+        - Supported formats: JPG, JPEG, PNG
+        - Max file size: 10 MB
+        - Recommended resolution: 1024x768 or higher
+        """)
 
 # ==================== FOOTER ====================
 
