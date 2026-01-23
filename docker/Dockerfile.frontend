@@ -15,8 +15,8 @@ RUN pip install --no-cache-dir --upgrade pip && \
     plotly==5.23.0 \
     requests==2.32.3
 
-# Copy frontend code from ui/ directory
-COPY ui/ /app/
+# Copy frontend code
+COPY streamlit_app.py /app/
 
 # Create non-root user
 RUN useradd -m -u 1000 appuser && \

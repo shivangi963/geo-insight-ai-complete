@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # ==================== DATABASES ====================
   
@@ -147,8 +145,8 @@ services:
   # Streamlit Frontend
   frontend:
     build:
-      context: .
-      dockerfile: docker/Dockerfile.frontend
+      context: ./frontend
+      dockerfile: ../docker/Dockerfile.frontend
     container_name: geoinsight-frontend
     restart: always
     ports:
@@ -161,7 +159,7 @@ services:
       STREAMLIT_SERVER_PORT: 8501
       STREAMLIT_SERVER_ADDRESS: 0.0.0.0
     volumes:
-      - ./ui:/app
+      - ./frontend:/app
     depends_on:
       - backend
     networks:
