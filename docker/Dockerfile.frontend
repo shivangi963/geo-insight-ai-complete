@@ -16,7 +16,8 @@ RUN pip install --no-cache-dir --upgrade pip && \
     requests==2.32.3
 
 # Copy frontend code
-COPY streamlit_app.py /app/
+COPY frontend/streamlit_app.py /app/
+
 
 # Create non-root user
 RUN useradd -m -u 1000 appuser && \

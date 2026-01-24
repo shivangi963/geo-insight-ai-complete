@@ -40,18 +40,16 @@ class Database:
     
     @classmethod
     async def is_connected(cls) -> bool:
-        """Check if database is connected - IMPROVED"""
-        if not cls._is_connected or cls.db is None:
+        if not cls._is_connected or cls.client is None or cls.db is None:
             return False
-        
         try:
-            # Actually ping the database to verify connection
-            await cls.client.admin.command('ping')
+            await cls.client.admin.command("ping")
             return True
         except Exception as e:
             print(f"⚠️ Database connection check failed: {e}")
             cls._is_connected = False
             return False
+
     
     @classmethod
     async def get_database(cls):

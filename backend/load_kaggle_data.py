@@ -1,46 +1,92 @@
 """
-GeoInsight AI - Kaggle Dataset Loader
-Load real estate data from CSV into MongoDB
-Place this file in: backend/load_kaggle_data.py
+FIXED: Kaggle Data Loader - Scriptable and Async-friendly
+Now supports command-line arguments and batch processing
 """
 import pandas as pd
 from pymongo import MongoClient
 from datetime import datetime
 import os
 import sys
-from geopy.geocoders import Nominatim
+import argparse
+from typing import Optional, Dict, List
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 import time
 
+# Optional geocoding
+try:
+    from geopy.geocoders import Nominatim
+    from geopy.exc import GeocoderTimedOut, GeocoderServiceError
+    GEOCODING_AVAILABLE = True
+except ImportError:
+    GEOCODING_AVAILABLE = False
+    print("⚠️ Geopy not installed. Geocoding disabled.")
+
+
 class KaggleDataLoader:
-    """Load and process Kaggle real estate datasets"""
+    """
+    FIXED: Load and process Kaggle real estate datasets
+    Now supports batch processing and CLI arguments
+    """
     
-    def __init__(self, mongodb_url="mongodb://localhost:27017", db_name="geoinsight_ai"):
+    def __init__(
+        self,
+        mongodb_url: str = "mongodb://localhost:27017",
+        db_name: str = "geoinsight_ai"
+    ):
         self.client = MongoClient(mongodb_url, serverSelectionTimeoutMS=5000)
         self.db = self.client[db_name]
         self.collection = self.db["properties"]
-        self.geolocator = Nominatim(user_agent="geoinsight_loader")
+        self.geolocator = None
         
-    def geocode_location(self, address, city, state):
-        """Get coordinates for address"""
-        try:
-            full_address = f"{address}, {city}, {state}"
-            location = self.geolocator.geocode(full_address)
-            time.sleep(1)  # Rate limiting
-            
-            if location:
-                return location.latitude, location.longitude
-            else:
-                # Fallback to city-level geocoding
-                location = self.geolocator.geocode(f"{city}, {state}")
-                time.sleep(1)
+        if GEOCODING_AVAILABLE:
+            self.geolocator = Nominatim(
+                user_agent="geoinsight_loader",
+                timeout=10
+            )
+    
+    def geocode_location(
+        self,
+        address: str,
+        city: str,
+        state: str,
+        retry_count: int = 2
+    ) -> tuple:
+        """
+        FIXED: Geocode with retry logic and better error handling
+        """
+        if not self.geolocator:
+            return None, None
+        
+        for attempt in range(retry_count):
+            try:
+                full_address = f"{address}, {city}, {state}"
+                location = self.geolocator.geocode(full_address)
+                
                 if location:
                     return location.latitude, location.longitude
-        except Exception as e:
-            print(f"⚠️ Geocoding error: {e}")
+                
+                # Fallback to city-level
+                location = self.geolocator.geocode(f"{city}, {state}")
+                if location:
+                    return location.latitude, location.longitude
+                
+                return None, None
+            
+            except (GeocoderTimedOut, GeocoderServiceError) as e:
+                if attempt < retry_count - 1:
+                    time.sleep(1)  # Wait before retry
+                    continue
+                print(f"⚠️ Geocoding failed: {e}")
+                return None, None
+            
+            except Exception as e:
+                print(f"⚠️ Geocoding error: {e}")
+                return None, None
         
         return None, None
     
-    def clean_price(self, price_str):
+    def clean_price(self, price_str) -> Optional[float]:
         """Clean price string (handles Cr, L, K formats)"""
         if pd.isna(price_str):
             return None
@@ -72,87 +118,114 @@ class KaggleDataLoader:
         except:
             return None
     
-    def load_csv(self, csv_path, clear_existing=False, max_rows=None, geocode=False):
-        """Load CSV into MongoDB"""
-        
-        # Check file exists
-        if not os.path.exists(csv_path):
-            print(f"❌ File not found: {csv_path}")
-            print("\n📁 Available files in data/:")
-            if os.path.exists('data'):
-                for f in os.listdir('data'):
-                    if f.endswith('.csv'):
-                        print(f"   • {f}")
-            return False
-        
-        print(f"\n📂 Reading {csv_path}...")
-        df = pd.read_csv(csv_path)
-        
-        print(f"✅ Found {len(df)} rows")
-        print(f"📊 Columns: {', '.join(df.columns.tolist())}")
-        
-        # Limit rows if specified
-        if max_rows:
-            df = df.head(max_rows)
-            print(f"📌 Limited to {max_rows} rows")
-        
-        # Clear existing data
-        if clear_existing:
-            deleted = self.collection.delete_many({})
-            print(f"🗑️ Deleted {deleted.deleted_count} existing properties")
-        
-        # Column mapping (common variations)
+    def detect_columns(self, df: pd.DataFrame) -> Dict[str, str]:
+        """
+        Auto-detect column names from CSV
+        """
         column_map = {
-            'address': ['address', 'location', 'property_name', 'name'],
-            'city': ['city', 'locality', 'area', 'location'],
-            'state': ['state', 'region'],
-            'price': ['price', 'cost', 'value', 'amount'],
-            'bedrooms': ['bedrooms', 'bhk', 'beds', 'bedroom'],
-            'bathrooms': ['bathrooms', 'baths', 'bathroom'],
-            'square_feet': ['square_feet', 'area', 'sqft', 'size', 'carpet_area'],
-            'property_type': ['property_type', 'type', 'category']
+            'address': ['address', 'location', 'property_name', 'name', 'street'],
+            'city': ['city', 'locality', 'area', 'town'],
+            'state': ['state', 'region', 'province'],
+            'price': ['price', 'cost', 'value', 'amount', 'rate'],
+            'bedrooms': ['bedrooms', 'bhk', 'beds', 'bedroom', 'bed'],
+            'bathrooms': ['bathrooms', 'baths', 'bathroom', 'bath'],
+            'square_feet': ['square_feet', 'area', 'sqft', 'size', 'carpet_area', 'built_up_area'],
+            'property_type': ['property_type', 'type', 'category', 'kind']
         }
         
-        def find_column(variations):
-            """Find first matching column"""
+        def find_column(variations: List[str]) -> Optional[str]:
             for var in variations:
                 for col in df.columns:
                     if var.lower() in col.lower():
                         return col
             return None
         
-        # Map columns
         mapped = {}
         for key, variations in column_map.items():
             col = find_column(variations)
             if col:
                 mapped[key] = col
-                print(f"✓ Mapped '{key}' → '{col}'")
+        
+        return mapped
+    
+    def load_csv(
+        self,
+        csv_path: str,
+        clear_existing: bool = False,
+        max_rows: Optional[int] = None,
+        geocode: bool = False,
+        geocode_batch_size: int = 10,
+        verbose: bool = True
+    ) -> bool:
+        """
+        FIXED: Load CSV with batch processing and better control
+        """
+        # Validate file
+        if not os.path.exists(csv_path):
+            print(f"❌ File not found: {csv_path}")
+            return False
+        
+        if verbose:
+            print(f"\n📂 Reading {csv_path}...")
+        
+        df = pd.read_csv(csv_path)
+        
+        if verbose:
+            print(f"✅ Found {len(df)} rows")
+            print(f"📊 Columns: {', '.join(df.columns.tolist())}")
+        
+        # Limit rows
+        if max_rows:
+            df = df.head(max_rows)
+            if verbose:
+                print(f"📌 Limited to {max_rows} rows")
+        
+        # Clear existing
+        if clear_existing:
+            deleted = self.collection.delete_many({})
+            if verbose:
+                print(f"🗑️ Deleted {deleted.deleted_count} existing properties")
+        
+        # Auto-detect columns
+        mapped = self.detect_columns(df)
         
         if not mapped.get('city'):
-            print("❌ Could not find 'city' column. Please check your CSV.")
+            print("❌ Could not find 'city' column")
             return False
+        
+        if verbose:
+            print("\n📋 Column Mapping:")
+            for key, col in mapped.items():
+                print(f"  • {key} → {col}")
         
         # Process data
         properties_added = 0
         errors = 0
         
-        print(f"\n⚙️ Processing properties...")
+        if verbose:
+            print(f"\n⚙️ Processing properties...")
+        
+        # Default coordinates (can be overridden)
+        default_coords = {
+            'India': (20.5937, 78.9629),
+            'US': (37.0902, -95.7129),
+            'UK': (55.3781, -3.4360)
+        }
         
         for idx, row in df.iterrows():
             try:
-                # Extract data with fallbacks
+                # Extract data
                 city = str(row.get(mapped.get('city', 'city'), 'Unknown'))
                 state = str(row.get(mapped.get('state', 'state'), 'Unknown'))
                 
-                # Handle address
+                # Address
                 address_col = mapped.get('address')
                 if address_col and address_col in row:
                     address = str(row[address_col])
                 else:
                     address = f"Property in {city}"
                 
-                # Handle price
+                # Price
                 price_col = mapped.get('price')
                 if price_col and price_col in row:
                     price = self.clean_price(row[price_col])
@@ -160,41 +233,48 @@ class KaggleDataLoader:
                     price = None
                 
                 if price is None or price <= 0:
-                    price = 300000  # Default fallback
+                    price = 300000  # Default
                 
-                # Handle bedrooms
+                # Bedrooms
                 bed_col = mapped.get('bedrooms')
                 if bed_col and bed_col in row:
-                    bedrooms = int(float(str(row[bed_col]).replace('BHK', '').strip()[0]))
+                    try:
+                        bed_str = str(row[bed_col]).replace('BHK', '').strip()
+                        bedrooms = int(float(bed_str[0]))
+                    except:
+                        bedrooms = 2
                 else:
                     bedrooms = 2
                 
-                # Handle bathrooms
+                # Bathrooms
                 bath_col = mapped.get('bathrooms')
-                bathrooms = float(row.get(bath_col, 2.0)) if bath_col else 2.0
+                try:
+                    bathrooms = float(row.get(bath_col, 2.0)) if bath_col else 2.0
+                except:
+                    bathrooms = 2.0
                 
-                # Handle square feet
+                # Square feet
                 sqft_col = mapped.get('square_feet')
                 if sqft_col and sqft_col in row:
-                    square_feet = int(float(row[sqft_col]))
+                    try:
+                        square_feet = int(float(row[sqft_col]))
+                    except:
+                        square_feet = int(price / 250)
                 else:
-                    square_feet = int(price / 250)  # Estimate
+                    square_feet = int(price / 250)
                 
                 # Property type
                 type_col = mapped.get('property_type')
                 property_type = str(row.get(type_col, 'Apartment')) if type_col else 'Apartment'
                 
-                # Geocoding (optional, slow)
-                if geocode and properties_added % 10 == 0:  # Only geocode every 10th property
+                # Geocoding (batch-based)
+                if geocode and properties_added % geocode_batch_size == 0:
                     lat, lon = self.geocode_location(address, city, state)
+                    if lat is None:
+                        # Use default for country
+                        lat, lon = default_coords.get('India')
                 else:
-                    lat, lon = None, None
-                
-                # Default coordinates if not geocoded
-                if lat is None:
-                    # India defaults (can be adjusted)
-                    lat = 19.0760  # Mumbai
-                    lon = 72.8777
+                    lat, lon = default_coords.get('India')
                 
                 # Create document
                 property_doc = {
@@ -218,27 +298,27 @@ class KaggleDataLoader:
                 properties_added += 1
                 
                 # Progress
-                if properties_added % 50 == 0:
+                if verbose and properties_added % 50 == 0:
                     print(f"✅ Loaded {properties_added} properties...")
-                
+            
             except Exception as e:
                 errors += 1
-                if errors <= 5:  # Only show first 5 errors
+                if verbose and errors <= 5:
                     print(f"⚠️ Error on row {idx}: {e}")
                 continue
         
-        print(f"\n{'='*60}")
-        print(f"✅ Successfully loaded {properties_added} properties!")
-        print(f"⚠️ Errors: {errors}")
-        print(f"📊 Total in database: {self.collection.count_documents({})}")
-        print(f"{'='*60}")
-        
-        # Show sample
-        self.show_sample()
+        if verbose:
+            print(f"\n{'='*60}")
+            print(f"✅ Successfully loaded {properties_added} properties!")
+            print(f"⚠️ Errors: {errors}")
+            print(f"📊 Total in database: {self.collection.count_documents({})}")
+            print(f"{'='*60}")
+            
+            self.show_sample()
         
         return True
     
-    def show_sample(self, limit=5):
+    def show_sample(self, limit: int = 5):
         """Show sample properties"""
         print(f"\n📋 Sample properties:")
         for prop in self.collection.find().limit(limit):
@@ -258,73 +338,143 @@ class KaggleDataLoader:
     def close(self):
         """Close connection"""
         self.client.close()
-        print("\n✅ Connection closed")
 
 
 def main():
-    """Main execution"""
+    """
+    FIXED: CLI interface with argparse
+    """
+    parser = argparse.ArgumentParser(
+        description="Load Kaggle real estate data into MongoDB"
+    )
+    
+    parser.add_argument(
+        'csv_path',
+        type=str,
+        help='Path to CSV file'
+    )
+    
+    parser.add_argument(
+        '--mongodb-url',
+        type=str,
+        default='mongodb://localhost:27017',
+        help='MongoDB connection URL'
+    )
+    
+    parser.add_argument(
+        '--db-name',
+        type=str,
+        default='geoinsight_ai',
+        help='Database name'
+    )
+    
+    parser.add_argument(
+        '--clear',
+        action='store_true',
+        help='Clear existing properties before loading'
+    )
+    
+    parser.add_argument(
+        '--max-rows',
+        type=int,
+        default=None,
+        help='Maximum rows to load'
+    )
+    
+    parser.add_argument(
+        '--geocode',
+        action='store_true',
+        help='Enable geocoding (slow)'
+    )
+    
+    parser.add_argument(
+        '--batch-size',
+        type=int,
+        default=10,
+        help='Geocoding batch size'
+    )
+    
+    parser.add_argument(
+        '--quiet',
+        action='store_true',
+        help='Suppress verbose output'
+    )
+    
+    args = parser.parse_args()
+    
+    # Initialize loader
     print("="*60)
     print("  GeoInsight AI - Kaggle Data Loader")
     print("="*60)
     
-    # Initialize loader
-    loader = KaggleDataLoader()
-    
-    # Interactive mode
-    print("\n📁 Available CSV files:")
-    csv_files = []
-    if os.path.exists('data'):
-        for f in os.listdir('data'):
-            if f.endswith('.csv'):
-                csv_files.append(f)
-                print(f"  {len(csv_files)}. data/{f}")
-    
-    if not csv_files:
-        print("\n❌ No CSV files found in data/ folder")
-        print("\nPlease add your Kaggle dataset to:")
-        print("  data/your_dataset.csv")
-        return
-    
-    # Get user input
-    print("\n" + "="*60)
-    choice = input(f"Select file (1-{len(csv_files)}) or enter path: ").strip()
-    
-    if choice.isdigit() and 1 <= int(choice) <= len(csv_files):
-        csv_path = os.path.join('data', csv_files[int(choice)-1])
-    else:
-        csv_path = choice
-    
-    # Options
-    print("\n" + "="*60)
-    clear = input("Clear existing properties? (y/n): ").lower() == 'y'
-    
-    max_rows_input = input("Max rows to load (press Enter for all): ").strip()
-    max_rows = int(max_rows_input) if max_rows_input else None
-    
-    geocode = input("Geocode addresses? (slow, y/n): ").lower() == 'y'
+    loader = KaggleDataLoader(
+        mongodb_url=args.mongodb_url,
+        db_name=args.db_name
+    )
     
     # Load data
-    print("\n" + "="*60)
     success = loader.load_csv(
-        csv_path=csv_path,
-        clear_existing=clear,
-        max_rows=max_rows,
-        geocode=geocode
+        csv_path=args.csv_path,
+        clear_existing=args.clear,
+        max_rows=args.max_rows,
+        geocode=args.geocode,
+        geocode_batch_size=args.batch_size,
+        verbose=not args.quiet
     )
     
     if success:
         print("\n✅ Data loaded successfully!")
         print("\n🚀 Next steps:")
-        print("  1. Restart your backend: uvicorn app.main:app --reload")
+        print("  1. Restart backend: uvicorn app.main:app --reload")
         print("  2. Refresh Streamlit dashboard")
-        print("  3. You should now see all loaded properties!")
+        print("  3. Properties are now available!")
     
     loader.close()
 
 
 if __name__ == "__main__":
     try:
-        main()
+        # If run without arguments, use interactive mode
+        if len(sys.argv) == 1:
+            print("="*60)
+            print("  GeoInsight AI - Kaggle Data Loader")
+            print("="*60)
+            
+            loader = KaggleDataLoader()
+            
+            # Find CSV files
+            csv_files = []
+            if os.path.exists('data'):
+                for f in os.listdir('data'):
+                    if f.endswith('.csv'):
+                        csv_files.append(f)
+                        print(f"  {len(csv_files)}. data/{f}")
+            
+            if not csv_files:
+                print("\n❌ No CSV files found in data/ folder")
+                print("\nUsage: python load_kaggle_data.py <csv_path> [options]")
+                print("Run: python load_kaggle_data.py --help for options")
+                sys.exit(1)
+            
+            # Interactive selection
+            choice = input(f"\nSelect file (1-{len(csv_files)}): ").strip()
+            csv_path = os.path.join('data', csv_files[int(choice)-1])
+            
+            clear = input("Clear existing? (y/n): ").lower() == 'y'
+            max_rows = input("Max rows (Enter for all): ").strip()
+            max_rows = int(max_rows) if max_rows else None
+            
+            success = loader.load_csv(
+                csv_path=csv_path,
+                clear_existing=clear,
+                max_rows=max_rows
+            )
+            
+            loader.close()
+        else:
+            # Use CLI mode
+            main()
+    
     except KeyboardInterrupt:
         print("\n\n⚠️ Cancelled by user")
     except Exception as e:

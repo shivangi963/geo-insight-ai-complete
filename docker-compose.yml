@@ -46,8 +46,8 @@ services:
   # FastAPI Backend
   backend:
     build:
-      context: ./backend
-      dockerfile: ../docker/Dockerfile.backend
+      context: .
+      dockerfile: docker/Dockerfile.backend
     container_name: geoinsight-backend
     restart: always
     ports:
@@ -89,8 +89,8 @@ services:
   # Celery Worker for Background Tasks
   celery-worker:
     build:
-      context: ./backend
-      dockerfile: ../docker/Dockerfile.backend
+      context: .
+      dockerfile: docker/Dockerfile.backend
     container_name: geoinsight-celery-worker
     restart: always
     environment:
@@ -126,8 +126,8 @@ services:
   # Flower - Celery Monitoring (Optional)
   flower:
     build:
-      context: ./backend
-      dockerfile: ../docker/Dockerfile.backend
+      context: .
+      dockerfile: docker/Dockerfile.backend
     container_name: geoinsight-flower
     restart: always
     ports:
@@ -145,8 +145,8 @@ services:
   # Streamlit Frontend
   frontend:
     build:
-      context: ./frontend
-      dockerfile: ../docker/Dockerfile.frontend
+      context: .
+      dockerfile: docker/Dockerfile.frontend
     container_name: geoinsight-frontend
     restart: always
     ports:

@@ -7,13 +7,31 @@ from typing import Dict, List, Optional
 import json
 from datetime import datetime
 
+_yolo_model = None
+
+def get_yolo_model():
+    global _yolo_model
+    if _yolo_model is None:
+        _yolo_model = YOLO('yolov8n.pt')
+    return _yolo_model
+
+_seg_model = None
+
+def get_seg_model():
+    global _seg_model
+    if _seg_model is None:
+        _seg_model = YOLO('yolov8n-seg.pt')
+    return _seg_model
+
+
 @shared_task(bind=True, name="analyze_street_image")
 def analyze_street_image_task(self, image_path: str) -> Dict:
 
     try:
         self.update_state(state='PROGRESS', meta={'status': 'Loading model...'})
         
-        model = YOLO('yolov8n.pt')  
+        model = get_yolo_model()
+  
         
         self.update_state(state='PROGRESS', meta={'status': 'Processing image...'})
         
@@ -33,9 +51,9 @@ def analyze_street_image_task(self, image_path: str) -> Dict:
                 }
                 detections.append(detection)
   
-        annotated_img = Image.fromarray(result.plot())
+        annotated_img = Image.fromarray(result.plot()[:, :, ::-1])
+        os.makedirs("results", exist_ok=True)  
         output_path = f"results/annotated_{os.path.basename(image_path)}"
-        os.makedirs("results", exist_ok=True)
         annotated_img.save(output_path)
         
         class_counts = {}
@@ -67,7 +85,7 @@ def calculate_green_space_task(self, image_path: str) -> Dict:
     try:
         self.update_state(state='PROGRESS', meta={'status': 'Loading segmentation model...'})
         
-        model = YOLO('yolov8n-seg.pt')
+        model = get_seg_model()
         
         self.update_state(state='PROGRESS', meta={'status': 'Processing image...'})
         
@@ -80,21 +98,23 @@ def calculate_green_space_task(self, image_path: str) -> Dict:
         
         
         green_classes = ['tree', 'grass', 'plant']
-        green_class_ids = [result.names.index(cls) for cls in green_classes if cls in result.names]
-        
- 
+        green_class_ids = [
+            k for k, v in result.names.items()
+            if v in green_classes
+        ]
+
         total_pixels = result.orig_shape[0] * result.orig_shape[1]
         green_pixels = 0
         
         if result.masks is not None:
             for mask, cls in zip(result.masks.data, result.boxes.cls):
                 if int(cls) in green_class_ids:
-                    green_pixels += mask.sum().item()
+                    green_pixels += (mask > 0.5).sum().item()
         
         green_percentage = (green_pixels / total_pixels) * 100 if total_pixels > 0 else 0
         
-     
-        annotated_img = Image.fromarray(result.plot())
+        annotated_img = Image.fromarray(result.plot()[:, :, ::-1])
+        os.makedirs("results", exist_ok=True)  
         output_path = f"results/green_space_{os.path.basename(image_path)}"
         annotated_img.save(output_path)
         
