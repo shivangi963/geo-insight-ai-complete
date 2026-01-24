@@ -68,3 +68,4 @@ supabase==2.25.1
 celery==5.3.4
 redis==5.0.1
 flower==2.0.1
+slowapi>=0.1.9
