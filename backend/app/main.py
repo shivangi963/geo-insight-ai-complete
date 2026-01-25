@@ -1,7 +1,3 @@
-"""
-FIXED GeoInsight AI Backend - Production Ready
-All imports verified, proper error handling, frontend integration tested
-"""
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Query, Path, UploadFile, File, Request
 from fastapi.security import APIKeyHeader
 from typing import List, Optional, Dict, Any
@@ -36,7 +32,7 @@ class Settings(BaseModel):
     cors_origins: List[str] = [
         "http://localhost:3000",
         "http://127.0.0.1:3000",
-        "http://localhost:8501",  # ✅ FIXED: Streamlit default port
+        "http://localhost:8501",  
         "http://127.0.0.1:8501"
     ]
     
@@ -435,6 +431,33 @@ try:
 except ImportError:
     logger.info("ℹ️ Workflow endpoints not available")
 
+task_store = {}
+
+def create_task(task_id: str, task_type: str, data: Dict):
+    """Create task in store"""
+    task_store[task_id] = {
+        'task_id': task_id,
+        'type': task_type,
+        'status': 'pending',
+        'progress': 0,
+        'message': 'Task queued',
+        'data': data,
+        'created_at': datetime.now().isoformat(),
+        'result': None,
+        'error': None
+    }
+
+def update_task(task_id: str, **updates):
+    """Update task in store"""
+    if task_id in task_store:
+        task_store[task_id].update(updates)
+        task_store[task_id]['updated_at'] = datetime.now().isoformat()
+
+def get_task(task_id: str) -> Optional[Dict]:
+    """Get task from store"""
+    return task_store.get(task_id)
+
+
 # ==================== LIFESPAN MANAGEMENT ====================
 
 @asynccontextmanager
@@ -509,7 +532,6 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
     expose_headers=["*"],
-    max_age=600
 )
 
 app.add_middleware(GZipMiddleware, minimum_size=1000)
@@ -847,6 +869,33 @@ async def analyze_neighborhood(
         logger.error(f"Failed to create analysis: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
+
+@app.get("/api/tasks/{task_id}")
+async def get_task_status(task_id: str):
+    """Get task status - FIXED ENDPOINT"""
+    task = get_task(task_id)
+    
+    if not task:
+        # Check if it's a Celery task
+        if CELERY_AVAILABLE:
+            try:
+                celery_task = AsyncResult(task_id, app=celery_app)
+                return {
+                    'task_id': task_id,
+                    'status': celery_task.state.lower(),
+                    'progress': 50 if celery_task.state == 'PROGRESS' else 0,
+                    'message': str(celery_task.info) if celery_task.info else '',
+                    'result': celery_task.result if celery_task.state == 'SUCCESS' else None,
+                    'error': str(celery_task.info) if celery_task.state == 'FAILURE' else None
+                }
+            except Exception as e:
+                logger.error(f"Celery task lookup failed: {e}")
+        
+        raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
+    
+    return task
+
+
 @app.get("/api/neighborhood/{analysis_id}", response_model=NeighborhoodAnalysis)
 @limiter.limit("60/minute")
 async def get_analysis(request: Request, analysis_id: str):
@@ -983,6 +1032,9 @@ async def get_recent(
     except Exception as e:
         logger.error(f"Failed to get recent analyses: {e}")
         raise HTTPException(status_code=500, detail="Failed to retrieve recent analyses")
+
+
+
 
 # ==================== IMAGE ANALYSIS ====================
 
