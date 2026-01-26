@@ -872,28 +872,51 @@ async def analyze_neighborhood(
 
 @app.get("/api/tasks/{task_id}")
 async def get_task_status(task_id: str):
-    """Get task status - FIXED ENDPOINT"""
-    task = get_task(task_id)
+    """Get task status - FIXED with better error handling"""
     
-    if not task:
-        # Check if it's a Celery task
-        if CELERY_AVAILABLE:
-            try:
-                celery_task = AsyncResult(task_id, app=celery_app)
+    # First check if it's an analysis ID (not task ID)
+    if task_id.startswith("analysis_"):
+        # Extract analysis ID
+        analysis_id = task_id.replace("analysis_", "")
+        try:
+            analysis = await get_neighborhood_analysis(analysis_id)
+            if analysis:
+                status = analysis.get('status', 'unknown')
+                progress = analysis.get('progress', 0)
+                
                 return {
                     'task_id': task_id,
-                    'status': celery_task.state.lower(),
-                    'progress': 50 if celery_task.state == 'PROGRESS' else 0,
-                    'message': str(celery_task.info) if celery_task.info else '',
-                    'result': celery_task.result if celery_task.state == 'SUCCESS' else None,
-                    'error': str(celery_task.info) if celery_task.state == 'FAILURE' else None
+                    'status': status,
+                    'progress': progress,
+                    'message': analysis.get('message', ''),
+                    'result': analysis if status == 'completed' else None,
+                    'error': analysis.get('error')
                 }
-            except Exception as e:
-                logger.error(f"Celery task lookup failed: {e}")
-        
-        raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
+        except Exception as e:
+            logger.error(f"Error getting analysis: {e}")
     
-    return task
+    # Check Celery if available
+    if CELERY_AVAILABLE:
+        try:
+            celery_task = AsyncResult(task_id, app=celery_app)
+            state = celery_task.state
+            
+            return {
+                'task_id': task_id,
+                'status': state.lower(),
+                'progress': 50 if state == 'PROGRESS' else 100 if state == 'SUCCESS' else 0,
+                'message': str(celery_task.info) if celery_task.info else '',
+                'result': celery_task.result if state == 'SUCCESS' else None,
+                'error': str(celery_task.info) if state == 'FAILURE' else None
+            }
+        except Exception as e:
+            logger.error(f"Celery lookup failed: {e}")
+    
+    # If task not found anywhere, return error
+    raise HTTPException(
+        status_code=404,
+        detail=f"Task {task_id} not found. It may have expired or never existed."
+    )
 
 
 @app.get("/api/neighborhood/{analysis_id}", response_model=NeighborhoodAnalysis)

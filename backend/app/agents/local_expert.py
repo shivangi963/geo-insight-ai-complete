@@ -9,11 +9,10 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Try Gemini import
 GEMINI_AVAILABLE = False
 try:
     import google.generativeai as genai
-    api_key = os.getenv("GEMINI_API_KEY")
+    api_key = os.getenv("GOOGLE_API_KEY")
     if api_key and api_key != "your_key_here":
         genai.configure(api_key=api_key)
         GEMINI_AVAILABLE = True
@@ -31,7 +30,7 @@ class LocalExpertAgent:
     
     def extract_numbers(self, text: str) -> List[float]:
         """Extract numbers from text - handles $, K, M"""
-        if not text or len(text) > 10000:  # Prevent processing huge strings
+        if not text or len(text) > 10000: 
             return []
         numbers = []
         
@@ -362,20 +361,12 @@ Rule of thumb: Rent ≤ 30% of gross income
 I'm your real estate intelligence assistant. I can help with:
 
 **Investment Analysis:**
-"Calculate ROI for $300,000 property with $2,000 monthly rent"
-"Analyze investment: $450K price, $2,800 rent, 20% down"
-
-**Price Evaluation:**
-"Is $500,000 a good price for a 3-bedroom house?"
-"What's fair market value for property at $750K?"
-
-**Rental Analysis:**
-"Fair rent for $400K property?"
-"Rental market for $2,500/month apartment"
+"Calculate ROI for 9000000 property with 15000 monthly rent"
+"Analyze investment:  7000000 price, 9000 rent, 20% down"
 
 **Market Insights:**
-"Compare neighborhoods in Austin"
-"Best areas for rental investment"
+"Compare neighborhoods in Mumbai"
+"Best areas for rental investment in Banglore"
 
 Please ask me a specific question about real estate!""",
             'success': True,
