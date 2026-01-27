@@ -365,7 +365,7 @@ I'm your real estate intelligence assistant. I can help with:
 "Analyze investment:  7000000 price, 9000 rent, 20% down"
 
 **Market Insights:**
-"Compare neighborhoods in Mumbai"
+"Compare neighborhoods in Mumbai" 
 "Best areas for rental investment in Banglore"
 
 Please ask me a specific question about real estate!""",
