@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Query, Path, UploadFile, File, Request
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Query, Path, UploadFile, File, Request, Depends
 from fastapi.security import APIKeyHeader
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
@@ -16,6 +16,20 @@ import hashlib
 from pathlib import Path as FilePath
 import re
 
+# ==================== SECURITY & CONFIGURATION IMPORTS ====================
+
+from .security_config import (
+    CORSSettings, 
+    RateLimitSettings,
+    RequestValidationSettings
+)
+from .middleware import (
+    RequestValidationMiddleware,
+    RequestLoggingMiddleware,
+    SecurityHeadersMiddleware,
+    RateLimitHeaderMiddleware
+)
+
 # ==================== SETTINGS ====================
 
 class Settings(BaseModel):
@@ -26,15 +40,12 @@ class Settings(BaseModel):
     debug: bool = False
     host: str = "0.0.0.0"
     port: int = 8000
+    environment: str = "development"
     
     # Security
     api_key: Optional[str] = None
-    cors_origins: List[str] = [
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "http://localhost:8501",  
-        "http://127.0.0.1:8501"
-    ]
+    secret_key: str = "change-me-in-production"
+    cors_origins: List[str] = CORSSettings.DEVELOPMENT_ORIGINS
     
     # Rate Limiting
     rate_limit_per_minute: int = 60
@@ -422,14 +433,17 @@ vector_db = None
 VECTOR_DB_AVAILABLE = False
 try:
     from .supabase_client import vector_db as imported_vector_db
-    if hasattr(imported_vector_db, 'enabled') and imported_vector_db.enabled:
+    
+    if imported_vector_db and getattr(imported_vector_db, 'enabled', False):
         vector_db = imported_vector_db
         VECTOR_DB_AVAILABLE = True
-        logger.info("Vector database available")
+        logger.info(" Vector database available and enabled")
     else:
-        logger.warning("Vector database not enabled")
+        logger.warning(" Vector database not enabled")
+        logger.warning(" Check SUPABASE_URL and SUPABASE_KEY in .env")
+        logger.warning(" They should not be 'your_url_here' or 'your_key_here'")
 except ImportError as e:
-    logger.warning(f"Vector database not available: {e}")
+    logger.warning(f"Vector database import failed: {e}")
 
 # Workflow
 WORKFLOW_ENABLED = False
@@ -607,25 +621,39 @@ app = FastAPI(
     redoc_url="/redoc"
 )
 
-# CORS Middleware
+# CORS Middleware (Handle cross-origin requests) - place before custom middleware
+cors_config = CORSSettings.get_cors_config(environment=settings.environment)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origins,
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["*"],
-    expose_headers=["*"],
+    **cors_config
 )
 
+# ==================== MIDDLEWARE STACK (In Order) ====================
+
+# 1. Security Headers Middleware (add security headers to all responses)
+app.add_middleware(SecurityHeadersMiddleware)
+
+# 2. Request Logging Middleware (log all requests/responses)
+app.add_middleware(RequestLoggingMiddleware)
+
+# 3. Request Validation Middleware (validate request size and content-type)
+app.add_middleware(RequestValidationMiddleware)
+
+# 4. Rate Limit Headers Middleware (add rate limit info to headers)
+app.add_middleware(RateLimitHeaderMiddleware)
+
+# 5. GZip Compression Middleware
 app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+logger.info(f"✅ Middleware stack initialized for environment: {settings.environment}")
 
 # Include workflow router if available
 if WORKFLOW_ENABLED:
     app.include_router(workflow_router, prefix="/api/workflow", tags=["workflow"])
 
-# ==================== RATE LIMITING (FIXED) ====================
+# ==================== RATE LIMITING ====================
 
-# FIXED: Proper slowapi import with fallback
+# Proper slowapi implementation with fallback
 RATE_LIMITING_AVAILABLE = False
 try:
     from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -636,9 +664,18 @@ try:
     app.state.limiter = limiter
     app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
     RATE_LIMITING_AVAILABLE = True
-    logger.info("Rate limiting enabled")
+    logger.info("✅ Rate limiting enabled via slowapi")
 except ImportError:
-    logger.warning("slowapi not installed - rate limiting disabled")
+    logger.warning("⚠️  slowapi not installed - rate limiting disabled")
+    # Create dummy limiter for graceful degradation
+    class DummyLimiter:
+        def limit(self, *args, **kwargs):
+            def decorator(func):
+                return func
+            return decorator
+    limiter = DummyLimiter()
+    app.state.limiter = limiter
+    
     
     # Mock decorator
     class MockLimiter:
@@ -867,10 +904,31 @@ async def root():
 async def get_properties_raw():
     """Get properties RAW without model validation - DEBUG ONLY"""
     try:
-        properties = await property_crud.get_all_properties(skip=0, limit=100)
+        logger.info("🔍 Raw properties endpoint called")
+        db = await Database.get_database()
+        logger.info(f"Connected to database: {db.name}")
+        
+        # Direct query to MongoDB
+        count = await db["properties"].count_documents({})
+        logger.info(f"Property count in DB: {count}")
+        
+        if count == 0:
+            logger.warning("⚠️ No properties found in database")
+            return []
+        
+        cursor = db["properties"].find().limit(100)
+        properties = []
+        async for doc in cursor:
+            # Convert _id to id
+            if "_id" in doc:
+                doc["id"] = str(doc["_id"])
+                del doc["_id"]
+            properties.append(doc)
+        
+        logger.info(f"✅ Returned {len(properties)} properties")
         return properties
     except Exception as e:
-        logger.error(f"Failed to get properties: {e}")
+        logger.error(f"Failed to get properties: {e}", exc_info=True)
         return {"error": str(e)}
 
 @app.get("/api/properties", response_model=List[PropertyResponse])

@@ -32,6 +32,10 @@ class PropertyCRUD:
             count_in_db = await db[self.collection_name].count_documents({})
             print(f"   Total documents in collection: {count_in_db}")
             
+            if count_in_db == 0:
+                print(f"   ⚠️  No documents found in {self.collection_name}")
+                return []
+            
             cursor = db[self.collection_name].find().skip(skip).limit(limit)
             
             properties = []
@@ -42,8 +46,8 @@ class PropertyCRUD:
             
             print(f"✅ Retrieved {len(properties)} properties from MongoDB")
             if properties:
+                print(f"   First property keys: {list(properties[0].keys())}")
                 print(f"   First property address: {properties[0].get('address')}")
-                print(f"   Last property address: {properties[-1].get('address')}")
             return properties
             
         except Exception as e:
