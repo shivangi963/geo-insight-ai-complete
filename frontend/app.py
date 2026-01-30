@@ -1,13 +1,26 @@
 """
-Main Streamlit Application - NO CUSTOM CSS VERSION
-Entry point for GeoInsight AI frontend
+GeoInsight AI - Main Streamlit Application
+Fixed version without custom CSS dependency
 """
 import streamlit as st
-from config import ui_config
-# REMOVED: from styles import get_custom_css  ← DELETE THIS LINE
-from components.sidebar import render_sidebar
-from components.header import render_header, render_footer
-from utils import init_session_state
+import sys
+import os
+
+# Add frontend directory to path if needed
+if os.path.exists('frontend'):
+    sys.path.insert(0, 'frontend')
+
+# Import configuration
+try:
+    from config import ui_config
+except ImportError:
+    # Fallback configuration
+    class UIConfig:
+        page_title = "GeoInsight AI - Real Estate Intelligence"
+        page_icon = "🏠"
+        layout = "wide"
+        initial_sidebar_state = "expanded"
+    ui_config = UIConfig()
 
 # Configure page
 st.set_page_config(
@@ -17,20 +30,41 @@ st.set_page_config(
     initial_sidebar_state=ui_config.initial_sidebar_state
 )
 
-# REMOVED: Apply custom CSS  ← DELETE THESE 2 LINES
-# st.markdown(get_custom_css(), unsafe_allow_html=True)
-
 # Initialize session state
+def init_session_state(key: str, default_value):
+    """Initialize session state variable if not exists"""
+    if key not in st.session_state:
+        st.session_state[key] = default_value
+
 init_session_state('analysis_history', [])
 init_session_state('agent_history', [])
 init_session_state('nav_to_analysis', '')
 init_session_state('ai_query', '')
+init_session_state('show_ai_history', False)
+
+# Import components
+try:
+    from components.sidebar import render_sidebar
+    from components.header import render_header, render_footer
+    HAS_COMPONENTS = True
+except ImportError:
+    HAS_COMPONENTS = False
+    st.warning("⚠️ Component imports failed. Running in basic mode.")
 
 # Render sidebar
-render_sidebar()
+if HAS_COMPONENTS:
+    render_sidebar()
+else:
+    st.sidebar.title("⚙️ GeoInsight AI")
+    st.sidebar.info("Control Panel")
 
 # Render header
-render_header()
+if HAS_COMPONENTS:
+    render_header()
+else:
+    st.title("🏠 GeoInsight AI")
+    st.caption("Complete Real Estate Intelligence Platform")
+    st.divider()
 
 # Main content tabs
 tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
@@ -44,33 +78,50 @@ tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
 
 # Tab 1: Properties
 with tab1:
-    from pages.properties import render_properties_page
-    render_properties_page()
+    try:
+        from pages_disabled.properties import render_properties_page
+        render_properties_page()
+    except Exception as e:
+        st.error(f"❌ Error: {e}")
 
-# Tab 2: Neighborhood Analysis
 with tab2:
-    from pages.neighborhood import render_neighborhood_page
-    render_neighborhood_page()
+    try:
+        from pages_disabled.neighborhood import render_neighborhood_page
+        render_neighborhood_page()
+    except Exception as e:
+        st.error(f"❌ Error: {e}")
 
-# Tab 3: AI Assistant
 with tab3:
-    from pages.ai_assistant import render_ai_assistant_page
-    render_ai_assistant_page()
+    try:
+        from pages_disabled.ai_assistant import render_ai_assistant_page
+        render_ai_assistant_page()
+    except Exception as e:
+        st.error(f"❌ Error: {e}")
 
-# Tab 4: Image Analysis
 with tab4:
-    from pages.image_analysis import render_image_analysis_page
-    render_image_analysis_page()
+    try:
+        from pages_disabled.image_analysis import render_image_analysis_page
+        render_image_analysis_page()
+    except Exception as e:
+        st.error(f"❌ Error: {e}")
 
-# Tab 5: Vector Search
 with tab5:
-    from pages.vector_search import render_vector_search_page
-    render_vector_search_page()
+    try:
+        from pages_disabled.vector_search import render_vector_search_page
+        render_vector_search_page()
+    except Exception as e:
+        st.error(f"❌ Error: {e}")
 
-# Tab 6: Dashboard
 with tab6:
-    from pages.dashboard import render_dashboard_page
-    render_dashboard_page()
+    try:
+        from pages_disabled.dashboard import render_dashboard_page
+        render_dashboard_page()
+    except Exception as e:
+        st.error(f"❌ Error: {e}")
 
 # Render footer
-render_footer()
+if HAS_COMPONENTS:
+    render_footer()
+else:
+    st.divider()
+    st.caption("GeoInsight AI")

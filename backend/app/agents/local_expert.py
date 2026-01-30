@@ -16,9 +16,9 @@ try:
     if api_key and api_key != "your_key_here":
         genai.configure(api_key=api_key)
         GEMINI_AVAILABLE = True
-        print("✅ Gemini API configured")
+        print("[OK] Gemini API configured")
 except Exception as e:
-    print(f"⚠️ Gemini not available: {e}")
+    print(f"[WARNING] Gemini not available: {e}")
 
 class LocalExpertAgent:
     """Enhanced AI Real Estate Agent"""
@@ -32,29 +32,47 @@ class LocalExpertAgent:
         """Extract numbers from text - handles $, K, M"""
         if not text or len(text) > 10000: 
             return []
+        
         numbers = []
         
-        patterns = [
-            r'\$?\s*(\d{1,3}(?:,\d{3})*(?:\.\d+)?)\s*([KkMm])?',
-        ]
+        # More intelligent pattern matching to avoid duplicates
+        # Look for numbers with multipliers (K, M) first
+        multiplier_pattern = r'\$?\s*(\d{1,3}(?:,\d{3})*(?:\.\d+)?)\s*([KkMm])'
+        matches = re.finditer(multiplier_pattern, text)
+        seen_positions = set()
         
-        for pattern in patterns:
-            matches = re.finditer(pattern, text)
-            for match in matches:
-                num_str = match.group(1).replace(',', '')
-                multiplier = match.group(2)
-                
-                try:
-                    num = float(num_str)
-                    if multiplier:
-                        mult_upper = multiplier.upper()
-                        if mult_upper == 'K':
-                            num *= 1000
-                        elif mult_upper == 'M':
-                            num *= 1000000
+        for match in matches:
+            num_str = match.group(1).replace(',', '')
+            multiplier = match.group(2).upper()
+            
+            try:
+                num = float(num_str)
+                if multiplier == 'K':
+                    num *= 1000
+                elif multiplier == 'M':
+                    num *= 1000000
+                if num > 0:  # Only add non-zero numbers
                     numbers.append(num)
-                except ValueError:
-                    continue
+                seen_positions.add((match.start(), match.end()))
+            except ValueError:
+                continue
+        
+        # Then look for standalone large numbers (5+ digits without multiplier)
+        large_number_pattern = r'(?<!\d)(\d{5,})(?!\d)'
+        matches = re.finditer(large_number_pattern, text)
+        
+        for match in matches:
+            # Check if this is part of an already processed multiplier match
+            if any(match.start() >= start and match.end() <= end for start, end in seen_positions):
+                continue
+                
+            try:
+                num = float(match.group(1))
+                if num > 0:  # Only add non-zero numbers
+                    numbers.append(num)
+                seen_positions.add((match.start(), match.end()))
+            except ValueError:
+                continue
         
         return numbers
     
@@ -126,20 +144,20 @@ class LocalExpertAgent:
         # Determine quality
         roi = metrics['cash_on_cash_roi']
         if roi > 12:
-            quality = "EXCELLENT ⭐⭐⭐"
-            recommendation = "✅ **STRONG BUY** - Outstanding returns with positive cash flow"
+            quality = "EXCELLENT [5-STAR]"
+            recommendation = "[STRONG BUY] Outstanding returns with positive cash flow"
         elif roi > 8:
-            quality = "GOOD ⭐⭐"
-            recommendation = "✅ **BUY** - Solid investment with good returns"
+            quality = "GOOD [4-STAR]"
+            recommendation = "[BUY] Solid investment with good returns"
         elif roi > 5:
-            quality = "FAIR ⭐"
-            recommendation = "⚠️ **MODERATE** - Acceptable but marginal returns"
+            quality = "FAIR [3-STAR]"
+            recommendation = "[MODERATE] Acceptable but marginal returns"
         else:
             quality = "POOR"
-            recommendation = "❌ **AVOID** - Returns too low for the risk"
+            recommendation = "[AVOID] Returns too low for the risk"
         
         if not is_positive:
-            recommendation = "❌ **AVOID** - Negative cash flow, not sustainable"
+            recommendation = "[AVOID] Negative cash flow, not sustainable"
         
         response = f"""**INVESTMENT ANALYSIS REPORT**
 
@@ -153,7 +171,7 @@ class LocalExpertAgent:
 • Rental Income: +${metrics['monthly_rent']:,.0f}
 • Operating Expenses (35%): -${metrics['monthly_expenses']:,.0f}
 • Mortgage Payment: -${metrics['monthly_mortgage']:,.0f}
-• **Net Monthly Cash Flow: ${metrics['monthly_cash_flow']:,.0f}** {'✅' if is_positive else '❌'}
+• **Net Monthly Cash Flow: ${metrics['monthly_cash_flow']:,.0f}** {'[+]' if is_positive else '[-]'}
 
 **ANNUAL PERFORMANCE**
 • Gross Rental Income: ${metrics['annual_rent']:,.0f}
@@ -161,9 +179,9 @@ class LocalExpertAgent:
 • Net Operating Income: **${metrics['annual_net_income']:,.0f}**
 
 **KEY INVESTMENT METRICS**
-1. **Rental Yield:** {metrics['rental_yield']:.2f}% {'✅ Good' if metrics['rental_yield'] > 5 else '⚠️ Low'}
-2. **Cap Rate:** {metrics['cap_rate']:.2f}% {'✅ Good' if metrics['cap_rate'] > 4 else '⚠️ Low'}
-3. **Cash-on-Cash ROI:** {metrics['cash_on_cash_roi']:.2f}% {'✅ Excellent' if metrics['cash_on_cash_roi'] > 10 else '✅ Good' if metrics['cash_on_cash_roi'] > 6 else '⚠️ Fair'}
+1. **Rental Yield:** {metrics['rental_yield']:.2f}% {'[GOOD]' if metrics['rental_yield'] > 5 else '[LOW]'}
+2. **Cap Rate:** {metrics['cap_rate']:.2f}% {'[GOOD]' if metrics['cap_rate'] > 4 else '[LOW]'}
+3. **Cash-on-Cash ROI:** {metrics['cash_on_cash_roi']:.2f}% {'[EXCELLENT]' if metrics['cash_on_cash_roi'] > 10 else '[GOOD]' if metrics['cash_on_cash_roi'] > 6 else '[FAIR]'}
 4. **Break-Even Occupancy:** {metrics['break_even_occupancy']:.1f}%
 
 **INVESTMENT QUALITY: {quality}**
@@ -178,9 +196,9 @@ class LocalExpertAgent:
 • Consider appreciation: Typical 3-5% annually in growing markets
 
 **DECISION FACTORS:**
-✅ Buy if: Positive cash flow + ROI > 8% + growing market
-⚠️ Reconsider if: Negative cash flow OR ROI < 6%
-❌ Avoid if: High vacancy risk + negative cash flow
+[+] Buy if: Positive cash flow + ROI > 8% + growing market
+[!] Reconsider if: Negative cash flow OR ROI < 6%
+[-] Avoid if: High vacancy risk + negative cash flow
 """
         return response
     
@@ -190,7 +208,7 @@ class LocalExpertAgent:
             return None
         
         try:
-            model = genai.GenerativeModel('gemini-2.0-flash-exp')
+            model = genai.GenerativeModel('gemini-2.5-flash')
             
             prompt = f"""You are a professional real estate investment advisor. Provide clear, actionable advice based on market data and investment principles.
 
@@ -342,33 +360,44 @@ Rule of thumb: Rent ≤ 30% of gross income
         
         # GENERAL QUERY - Try Gemini
         if self.use_gemini:
-            gemini_response = await self.query_gemini(query)
-            if gemini_response:
-                return {
-                    'query': query,
-                    'answer': gemini_response,
-                    'success': True,
-                    'confidence': 0.9,
-                    'source': 'gemini',
-                    'type': 'general'
-                }
+            try:
+                gemini_response = await self.query_gemini(query)
+                if gemini_response:
+                    return {
+                        'query': query,
+                        'answer': gemini_response,
+                        'success': True,
+                        'confidence': 0.9,
+                        'source': 'gemini',
+                        'type': 'general'
+                    }
+            except Exception as e:
+                print(f"Gemini query error: {e}")
         
-        # FALLBACK
+        # FALLBACK - More helpful generic response
         return {
             'query': query,
             'answer': f"""**GeoInsight AI Assistant**
 
 I'm your real estate intelligence assistant. I can help with:
 
-**Investment Analysis:**
-"Calculate ROI for 9000000 property with 15000 monthly rent"
-"Analyze investment:  7000000 price, 9000 rent, 20% down"
+**📊 Investment Analysis:**
+- "Calculate ROI for 9000000 property with 15000 monthly rent"
+- "Analyze investment: 7000000 price, 9000 rent, 20% down"
 
-**Market Insights:**
-"Compare neighborhoods in Mumbai" 
-"Best areas for rental investment in Banglore"
+**💰 Price Analysis:**
+- "Is 450000 a good price for a 3BHK?"
+- "What's fair market value for 750K property?"
 
-Please ask me a specific question about real estate!""",
+**🏠 Rental Analysis:**
+- "Fair rent for 400K property?"
+- "Expected rent for 350K house"
+
+**🏙️ Market Insights:**
+- "Best neighborhoods for rental investment?"
+- "Compare downtown vs suburban properties"
+
+For general knowledge questions (like population, weather, etc), I'm optimized for real estate analysis. Try asking me about property investments instead!""",
             'success': True,
             'confidence': 0.7,
             'type': 'help'

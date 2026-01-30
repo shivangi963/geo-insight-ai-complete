@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.gzip import GZipMiddleware
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, validator, ValidationError
 import sys
 import os
 import logging
@@ -223,18 +223,28 @@ class PropertyUpdate(BaseModel):
     description: Optional[str] = None
 
 class PropertyResponse(BaseModel):
-    id: str
-    address: str
-    city: str
-    state: str = "Unknown"
-    price: float
-    bedrooms: int
-    bathrooms: float
-    square_feet: int
-    property_type: str
+    id: Optional[str] = None
+    address: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    zip_code: Optional[str] = None
+    price: Optional[float] = None
+    bedrooms: Optional[int] = None
+    bathrooms: Optional[float] = None
+    square_feet: Optional[int] = None
+    property_type: Optional[str] = None
     description: Optional[str] = None
-    created_at: datetime
-    updated_at: datetime
+    locality: Optional[str] = None
+    region: Optional[str] = None
+    status: Optional[str] = None
+    age: Optional[str] = None
+    price_per_sqft: Optional[float] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        orm_mode = True
+        allow_population_by_field_name = True
 
 class HealthResponse(BaseModel):
     status: str
@@ -316,7 +326,7 @@ class VectorStoreRequest(BaseModel):
 # ==================== IMPORTS WITH ERROR HANDLING ====================
 
 try:
-    from app.crud import (
+    from .crud import (
         property_crud,
         create_neighborhood_analysis,
         get_neighborhood_analysis,
@@ -331,7 +341,7 @@ except ImportError as e:
 
 # Geospatial with fallback
 try:
-    from app.geospatial import OpenStreetMapClient, calculate_walk_score
+    from .geospatial import OpenStreetMapClient, calculate_walk_score
     osm_client = OpenStreetMapClient()
     logger.info("✅ Geospatial module imported")
 except ImportError as e:
@@ -372,7 +382,7 @@ except ImportError as e:
 
 # AI Agent
 try:
-    from app.agents.local_expert import agent
+    from .agents.local_expert import agent
     AI_AGENT_AVAILABLE = True
     logger.info("✅ AI Agent imported")
 except ImportError as e:
@@ -392,7 +402,7 @@ except ImportError as e:
 
 # Database
 try:
-    from app.database import Database
+    from .database import Database
     logger.info("✅ Database module imported")
 except ImportError as e:
     logger.error(f"❌ Failed to import database: {e}")
@@ -412,7 +422,7 @@ except ImportError:
 vector_db = None
 VECTOR_DB_AVAILABLE = False
 try:
-    from app.supabase_client import vector_db as imported_vector_db
+    from .supabase_client import vector_db as imported_vector_db
     if hasattr(imported_vector_db, 'enabled') and imported_vector_db.enabled:
         vector_db = imported_vector_db
         VECTOR_DB_AVAILABLE = True
@@ -425,7 +435,7 @@ except ImportError as e:
 # Workflow
 WORKFLOW_ENABLED = False
 try:
-    from app.workflow_endpoints import router as workflow_router
+    from .workflow_endpoints import router as workflow_router
     WORKFLOW_ENABLED = True
     logger.info("✅ Workflow endpoints enabled")
 except ImportError:
@@ -751,6 +761,16 @@ async def root():
 
 # ==================== PROPERTY ENDPOINTS ====================
 
+@app.get("/api/properties/raw")
+async def get_properties_raw():
+    """Get properties RAW without model validation - DEBUG ONLY"""
+    try:
+        properties = await property_crud.get_all_properties(skip=0, limit=100)
+        return properties
+    except Exception as e:
+        logger.error(f"Failed to get properties: {e}")
+        return {"error": str(e)}
+
 @app.get("/api/properties", response_model=List[PropertyResponse])
 @limiter.limit("60/minute")
 async def get_properties(
@@ -765,8 +785,23 @@ async def get_properties(
         
         if city:
             properties = [p for p in properties if p.get('city', '').lower() == city.lower()]
-        
-        return properties
+        # Validate each item against PropertyResponse and log validation errors
+        valid_props: List[Dict[str, Any]] = []
+        validation_errors: List[Dict[str, Any]] = []
+
+        for p in properties:
+            try:
+                validated = PropertyResponse.parse_obj(p)
+                valid_props.append(validated.dict())
+            except ValidationError as ve:
+                logger.warning(f"Property validation failed (id={p.get('id')}): {ve}")
+                validation_errors.append({"id": p.get('id'), "errors": ve.errors()})
+
+        logger.info(f"Property validation: {len(valid_props)}/{len(properties)} passed, {len(validation_errors)} failed")
+        if validation_errors:
+            logger.debug(f"Validation errors sample: {validation_errors[:5]}")
+
+        return valid_props
     except Exception as e:
         logger.error(f"Failed to get properties: {e}")
         raise HTTPException(status_code=500, detail="Failed to retrieve properties")
@@ -831,7 +866,7 @@ async def analyze_neighborhood(
         
         if use_celery:
             try:
-                from app.tasks.geospatial_tasks import analyze_neighborhood_task
+                from .tasks.geospatial_tasks import analyze_neighborhood_task
                 task = analyze_neighborhood_task.delay(
                     analysis_id=analysis_id,
                     request_data=analysis_request.dict()
@@ -1097,7 +1132,7 @@ async def analyze_image(
         # Process with Celery if available
         if CELERY_AVAILABLE:
             try:
-                from app.tasks.computer_vision_tasks import analyze_street_image_task
+                from .tasks.computer_vision_tasks import analyze_street_image_task
                 task = analyze_street_image_task.delay(str(temp_path), analysis_type)
                 task_id = task.id
                 logger.info(f"Celery image task created: {task_id}")
@@ -1158,6 +1193,77 @@ async def get_stats(request: Request):
     except Exception as e:
         logger.error(f"Stats error: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to retrieve statistics: {str(e)}")
+
+
+@app.get("/api/debug/db_info")
+async def debug_db_info():
+    """Debug endpoint: show DB connection, properties count and samples"""
+    try:
+        connected = await Database.is_connected()
+        db = await Database.get_database()
+
+        # Count properties and fetch a few samples
+        try:
+            props_count = await db.properties.count_documents({})
+        except Exception:
+            props_count = None
+
+        samples = []
+        try:
+            cursor = db.properties.find().limit(5)
+            async for doc in cursor:
+                # Convert ObjectId to string id
+                if isinstance(doc.get('_id', None), object):
+                    doc['id'] = str(doc['_id'])
+                    del doc['_id']
+                samples.append(doc)
+        except Exception:
+            samples = []
+
+        return {
+            "database": os.getenv('DATABASE_NAME', 'geoinsight_ai'),
+            "connected": connected,
+            "properties_count": props_count,
+            "sample_properties": samples
+        }
+    except Exception as e:
+        logger.error(f"Debug DB info failed: {e}")
+        return {"error": str(e)}
+
+
+@app.get("/api/debug/db_info")
+async def debug_db_info(request: Request):
+    """Debug endpoint: show which MongoDB server and properties count the running app sees"""
+    try:
+        db = await Database.get_database()
+        # Get server info if available
+        server_info = None
+        try:
+            server_info = await db.client.admin.command('ismaster')
+        except Exception:
+            try:
+                server_info = await db.client.server_info()
+            except Exception:
+                server_info = {'info': 'unavailable'}
+
+        total = await db.properties.count_documents({})
+        sample = []
+        cursor = db.properties.find().limit(10)
+        async for doc in cursor:
+            sample.append({
+                'id': str(doc.get('_id')),
+                'address': doc.get('address')
+            })
+
+        return {
+            'server_info': server_info,
+            'database': db.name,
+            'total_properties': total,
+            'sample': sample
+        }
+    except Exception as e:
+        logger.error(f"Debug DB info failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 # ==================== VECTOR DB ENDPOINTS ====================
 

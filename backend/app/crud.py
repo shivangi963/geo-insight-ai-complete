@@ -2,7 +2,7 @@ from typing import List, Optional, Dict, Any
 from pydantic import BaseModel
 from bson import ObjectId
 from datetime import datetime
-from app.database import get_database
+from .database import get_database
 
 # Helper function to convert MongoDB document to dict
 def document_to_dict(doc: Dict) -> Dict:
@@ -24,17 +24,32 @@ class PropertyCRUD:
         """Get all properties with pagination"""
         try:
             db = await get_database()
+            
+            # DEBUG: Log which DB we're using
+            print(f"\n🔍 DEBUG: Querying database '{db.name}', collection '{self.collection_name}'")
+            
+            # First, check count in the database
+            count_in_db = await db[self.collection_name].count_documents({})
+            print(f"   Total documents in collection: {count_in_db}")
+            
             cursor = db[self.collection_name].find().skip(skip).limit(limit)
             
             properties = []
             async for doc in cursor:
-                properties.append(document_to_dict(doc))
+                prop_dict = document_to_dict(doc)
+                properties.append(prop_dict)
+                print(f"   - Retrieved: {prop_dict.get('locality', prop_dict.get('address', 'N/A'))}")
             
             print(f"✅ Retrieved {len(properties)} properties from MongoDB")
+            if properties:
+                print(f"   First property address: {properties[0].get('address')}")
+                print(f"   Last property address: {properties[-1].get('address')}")
             return properties
             
         except Exception as e:
             print(f"❌ Error getting properties: {e}")
+            import traceback
+            traceback.print_exc()
             return []
     
     async def get_property_by_id(self, property_id: str) -> Optional[Dict[str, Any]]:
