@@ -115,23 +115,26 @@ class OpenStreetMapClient:
         ox.settings.max_query_area_size = 50000000  # ✅ Limit query size
     
     def get_nearby_amenities(
-        self,
-        address: str,
-        radius: float = 1000,
-        amenity_types: Optional[List[str]] = None,
-        max_results_per_type: int = 10
+    self,
+    address: str,
+    radius: float = 1000,
+    amenity_types: Optional[List[str]] = None,
+    max_results_per_type: int = 10
     ) -> Dict:
-        """
-        FIXED: Get nearby amenities with timeout and error handling
-        """
+    
         if amenity_types is None:
             amenity_types = [
                 'restaurant', 'cafe', 'school', 'hospital',
                 'park', 'supermarket', 'bank', 'pharmacy'
             ]
         
+        # Limit to 6 types to reduce timeout risk
+        if len(amenity_types) > 6:
+            print(f"Limiting {len(amenity_types)} amenity types to 6 for performance")
+            amenity_types = amenity_types[:6]
+        
         try:
-            # ✅ Geocode with timeout
+            # Geocode with timeout
             geocoder = LocationGeocoder()
             coordinates = geocoder.address_to_coordinates(address)
             
@@ -151,21 +154,43 @@ class OpenStreetMapClient:
             
             amenities_data = {}
             errors = []
+            timeout_count = 0
             
-            # ✅ Fetch amenities with timeout protection
+            # Fetch amenities with per-type timeout
             for amenity in amenity_types:
                 try:
-                    # Use timeout on OSM query
-                    amenities = ox.features.features_from_bbox(
-                        north, south, east, west,
-                        tags={'amenity': amenity}
-                    )
+                    print(f"Fetching {amenity}...")
+                    
+                    # Use signal for timeout (Unix only)
+                    import signal
+                    
+                    def timeout_handler(signum, frame):
+                        raise TimeoutError(f"Query timeout for {amenity}")
+                    
+                    try:
+                        # Set 10 second timeout per amenity type
+                        signal.signal(signal.SIGALRM, timeout_handler)
+                        signal.alarm(10)
+                        
+                        amenities = ox.features.features_from_bbox(
+                            north, south, east, west,
+                            tags={'amenity': amenity}
+                        )
+                        
+                        signal.alarm(0)  # Cancel alarm
+                        
+                    except AttributeError:
+                        # Windows doesn't support SIGALRM
+                        # Just run without timeout
+                        amenities = ox.features.features_from_bbox(
+                            north, south, east, west,
+                            tags={'amenity': amenity}
+                        )
                     
                     if not amenities.empty:
                         amenities_list = []
                         
                         for idx, row in amenities.iterrows():
-                            # Get centroid safely
                             try:
                                 centroid = row.geometry.centroid
                                 amenity_lat = centroid.y
@@ -190,17 +215,23 @@ class OpenStreetMapClient:
                             }
                             amenities_list.append(amenity_info)
                         
-                        # Sort by distance and limit results
+                        # Sort and limit
                         amenities_list.sort(key=lambda x: x['distance_km'])
                         amenities_data[amenity] = amenities_list[:max_results_per_type]
                     else:
                         amenities_data[amenity] = []
                 
-                except TimeoutError:
-                    error_msg = f"Timeout fetching {amenity}"
+                except TimeoutError as te:
+                    timeout_count += 1
+                    error_msg = f"Timeout fetching {amenity} (took >10s)"
                     print(f"⏱️ {error_msg}")
                     errors.append(error_msg)
                     amenities_data[amenity] = []
+                    
+                    # If too many timeouts, stop
+                    if timeout_count >= 3:
+                        print(f"⚠️ Too many timeouts ({timeout_count}), stopping early")
+                        break
                 
                 except Exception as e:
                     error_msg = f"Error fetching {amenity}: {str(e)}"
@@ -214,7 +245,8 @@ class OpenStreetMapClient:
                 "search_radius_m": radius,
                 "amenities": amenities_data,
                 "errors": errors if errors else None,
-                "timestamp": datetime.now().isoformat()
+                "timestamp": datetime.now().isoformat(),
+                "timeout_count": timeout_count
             }
         
         except Exception as e:

@@ -1,7 +1,7 @@
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel
 from bson import ObjectId
-from datetime import datetime
+from datetime import datetime, timedelta
 from .database import get_database
 
 # Helper function to convert MongoDB document to dict
@@ -284,5 +284,36 @@ async def get_analysis_count() -> int:
         print(f"❌ Error getting analysis count: {e}")
         return 0
 
+async def cleanup_stuck_analyses(max_age_minutes: int = 30):
+    """
+    Clean up analyses stuck in 'processing' state
+    """
+    try:
+        db = await get_database()
+        
+        cutoff_time = datetime.now() - timedelta(minutes=max_age_minutes)
+        
+        result = await db[NEIGHBORHOOD_ANALYSIS_COLLECTION].update_many(
+            {
+                "status": "processing",
+                "created_at": {"$lt": cutoff_time}
+            },
+            {
+                "$set": {
+                    "status": "failed",
+                    "error": f"Analysis timed out after {max_age_minutes} minutes",
+                    "progress": 100,
+                    "updated_at": datetime.now()
+                }
+            }
+        )
+        
+        if result.modified_count > 0:
+            print(f"✅ Cleaned up {result.modified_count} stuck analyses")
+        
+        return result.modified_count
+    except Exception as e:
+        print(f"❌ Error cleaning up stuck analyses: {e}")
+        return 0
 # Create instance
 property_crud = PropertyCRUD()

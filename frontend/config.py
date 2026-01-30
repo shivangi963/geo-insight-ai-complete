@@ -69,6 +69,6 @@ map_config = MapConfig()
 pagination_config = PaginationConfig()
 
 # Polling settings for async tasks
-TASK_POLL_INTERVAL = 2  # seconds
-TASK_MAX_WAIT = 120  # seconds
+TASK_POLL_INTERVAL = 3  # seconds
+TASK_MAX_WAIT = 300 # seconds
 TASK_PROGRESS_BAR_ENABLED = True

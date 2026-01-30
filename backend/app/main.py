@@ -85,9 +85,8 @@ PROGRESS_MAP = 85
 PROGRESS_COMPLETE = 100
 
 AMENITY_TYPES = [
-    'restaurant', 'cafe', 'school', 'hospital',
-    'park', 'supermarket', 'bank', 'pharmacy',
-    'gym', 'library', 'transit_station'
+    'restaurant', 'cafe', 'school', 
+    'hospital', 'park', 'supermarket'
 ]
 
 MAX_UPLOAD_SIZE = settings.upload_max_size
@@ -334,18 +333,18 @@ try:
         update_analysis_status,
         get_analysis_count
     )
-    logger.info("✅ CRUD operations imported")
+    logger.info("CRUD operations imported")
 except ImportError as e:
-    logger.error(f"❌ Failed to import CRUD: {e}")
+    logger.error(f"Failed to import CRUD: {e}")
     raise
 
 # Geospatial with fallback
 try:
     from .geospatial import OpenStreetMapClient, calculate_walk_score
     osm_client = OpenStreetMapClient()
-    logger.info("✅ Geospatial module imported")
+    logger.info("Geospatial module imported")
 except ImportError as e:
-    logger.warning(f"⚠️ Geospatial module import failed: {e}")
+    logger.warning(f"Geospatial module import failed: {e}")
     
     class MockOpenStreetMapClient:
         def get_nearby_amenities(self, address, radius=1000, amenity_types=None):
@@ -384,9 +383,9 @@ except ImportError as e:
 try:
     from .agents.local_expert import agent
     AI_AGENT_AVAILABLE = True
-    logger.info("✅ AI Agent imported")
+    logger.info("AI Agent imported")
 except ImportError as e:
-    logger.warning(f"⚠️ AI Agent import failed: {e}")
+    logger.warning(f"AI Agent import failed: {e}")
     AI_AGENT_AVAILABLE = False
     
     class MockLocalExpertAgent:
@@ -403,9 +402,9 @@ except ImportError as e:
 # Database
 try:
     from .database import Database
-    logger.info("✅ Database module imported")
+    logger.info("Database module imported")
 except ImportError as e:
-    logger.error(f"❌ Failed to import database: {e}")
+    logger.error(f"Failed to import database: {e}")
     raise
 
 # Celery with fallback
@@ -414,9 +413,9 @@ try:
     from celery.result import AsyncResult
     from celery_config import celery_app
     CELERY_AVAILABLE = True
-    logger.info("✅ Celery available")
+    logger.info("Celery available")
 except ImportError:
-    logger.warning("⚠️ Celery not available - using sync mode")
+    logger.warning("Celery not available - using sync mode")
 
 # Vector DB - FIXED import
 vector_db = None
@@ -426,22 +425,87 @@ try:
     if hasattr(imported_vector_db, 'enabled') and imported_vector_db.enabled:
         vector_db = imported_vector_db
         VECTOR_DB_AVAILABLE = True
-        logger.info("✅ Vector database available")
+        logger.info("Vector database available")
     else:
-        logger.warning("⚠️ Vector database not enabled")
+        logger.warning("Vector database not enabled")
 except ImportError as e:
-    logger.warning(f"⚠️ Vector database not available: {e}")
+    logger.warning(f"Vector database not available: {e}")
 
 # Workflow
 WORKFLOW_ENABLED = False
 try:
     from .workflow_endpoints import router as workflow_router
     WORKFLOW_ENABLED = True
-    logger.info("✅ Workflow endpoints enabled")
+    logger.info("Workflow endpoints enabled")
 except ImportError:
-    logger.info("ℹ️ Workflow endpoints not available")
+    logger.info("Workflow endpoints not available")
 
 task_store = {}
+# Lightweight in-memory task cache with TTL, max size and versioning
+task_cache: Dict[str, Dict[str, Any]] = {}
+TASK_CACHE_MAX = 2000
+TASK_CACHE_DEFAULT_TTL = 3600
+
+def set_task_cache(task_id: str, value: Any, ttl: int = TASK_CACHE_DEFAULT_TTL):
+    expiry = datetime.now() + timedelta(seconds=ttl)
+    task_cache[task_id] = {
+        'value': value,
+        'expiry': expiry,
+        'version': settings.app_version,
+        'created_at': datetime.now()
+    }
+    # Evict if over capacity
+    if len(task_cache) > TASK_CACHE_MAX:
+        # remove oldest expiry first
+        items = sorted(task_cache.items(), key=lambda kv: kv[1].get('expiry'))
+        while len(task_cache) > TASK_CACHE_MAX:
+            k, _ = items.pop(0)
+            task_cache.pop(k, None)
+
+def get_task_cache(task_id: str) -> Optional[Any]:
+    entry = task_cache.get(task_id)
+    if not entry:
+        return None
+    if entry.get('version') != settings.app_version:
+        # Invalidate on version mismatch
+        task_cache.pop(task_id, None)
+        return None
+    if datetime.now() > entry.get('expiry'):
+        task_cache.pop(task_id, None)
+        return None
+    return entry.get('value')
+
+def clear_expired_task_cache():
+    now = datetime.now()
+    expired = [k for k, v in task_cache.items() if v.get('expiry') and now > v.get('expiry')]
+    for k in expired:
+        task_cache.pop(k, None)
+
+
+def clear_task_store_expired(max_age_seconds: int = 86400):
+    """Clear entries from task_store older than max_age_seconds to avoid memory growth."""
+    now = datetime.now()
+    to_remove = []
+    for k, v in list(task_store.items()):
+        created = v.get('created_at')
+        try:
+            created_dt = datetime.fromisoformat(created) if isinstance(created, str) else created
+        except Exception:
+            continue
+        if isinstance(created_dt, datetime) and (now - created_dt).total_seconds() > max_age_seconds:
+            to_remove.append(k)
+    for k in to_remove:
+        task_store.pop(k, None)
+        # also remove from cache
+        task_cache.pop(k, None)
+
+
+def _run_coro_in_thread(coro_func, *args, **kwargs):
+    """Helper to run an async coroutine in a new event loop inside a background thread."""
+    try:
+        asyncio.run(coro_func(*args, **kwargs))
+    except Exception as e:
+        logger.error(f"Background coroutine failed: {e}")
 
 def create_task(task_id: str, task_type: str, data: Dict):
     """Create task in store"""
@@ -456,12 +520,17 @@ def create_task(task_id: str, task_type: str, data: Dict):
         'result': None,
         'error': None
     }
+    # create quick cache entry for lookup
+    set_task_cache(task_id, {'status': 'pending', 'task_id': task_id, 'type': task_type}, ttl=TASK_CACHE_DEFAULT_TTL)
 
 def update_task(task_id: str, **updates):
     """Update task in store"""
     if task_id in task_store:
         task_store[task_id].update(updates)
         task_store[task_id]['updated_at'] = datetime.now().isoformat()
+        # propagate to cache if completed or failed or has progress
+        if 'status' in updates or 'result' in updates or 'error' in updates:
+            set_task_cache(task_id, task_store[task_id], ttl=TASK_CACHE_DEFAULT_TTL)
 
 def get_task(task_id: str) -> Optional[Dict]:
     """Get task from store"""
@@ -473,7 +542,7 @@ def get_task(task_id: str) -> Optional[Dict]:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan management"""
-    logger.info("🚀 Starting GeoInsight AI Backend")
+    logger.info("Starting GeoInsight AI Backend")
     logger.info(f"📊 Features: Celery={CELERY_AVAILABLE}, VectorDB={VECTOR_DB_AVAILABLE}")
     
     create_directories()
@@ -483,12 +552,12 @@ async def lifespan(app: FastAPI):
     for attempt in range(max_retries):
         try:
             await Database.connect()
-            logger.info("✅ Database connected")
+            logger.info("Database connected")
             break
         except Exception as e:
-            logger.error(f"❌ Database connection attempt {attempt + 1} failed: {e}")
+            logger.error(f"Database connection attempt {attempt + 1} failed: {e}")
             if attempt == max_retries - 1:
-                logger.critical("❌ Failed to connect to database")
+                logger.critical("Failed to connect to database")
                 raise
             await asyncio.sleep(2 ** attempt)
     
@@ -509,12 +578,12 @@ async def lifespan(app: FastAPI):
     except asyncio.CancelledError:
         pass
     
-    logger.info("🛑 Shutting down GeoInsight AI")
+    logger.info("Shutting down GeoInsight AI")
     try:
         await Database.close()
-        logger.info("✅ Database closed")
+        logger.info("Database closed")
     except Exception as e:
-        logger.error(f"❌ Error closing database: {e}")
+        logger.error(f"Error closing database: {e}")
 
 async def periodic_cleanup():
     """Periodic cleanup task"""
@@ -522,6 +591,10 @@ async def periodic_cleanup():
         await asyncio.sleep(3600)
         cleanup_temp_files()
         cache.clear_expired()
+        # clear task cache expired entries as well
+        clear_expired_task_cache()
+        # cleanup old entries in task_store to avoid memory leak
+        clear_task_store_expired()
 
 # ==================== APPLICATION INIT ====================
 
@@ -552,7 +625,7 @@ if WORKFLOW_ENABLED:
 
 # ==================== RATE LIMITING (FIXED) ====================
 
-# ✅ FIXED: Proper slowapi import with fallback
+# FIXED: Proper slowapi import with fallback
 RATE_LIMITING_AVAILABLE = False
 try:
     from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -563,9 +636,9 @@ try:
     app.state.limiter = limiter
     app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
     RATE_LIMITING_AVAILABLE = True
-    logger.info("✅ Rate limiting enabled")
+    logger.info("Rate limiting enabled")
 except ImportError:
-    logger.warning("⚠️ slowapi not installed - rate limiting disabled")
+    logger.warning("slowapi not installed - rate limiting disabled")
     
     # Mock decorator
     class MockLimiter:
@@ -696,14 +769,43 @@ async def process_neighborhood_sync(
         }
         
         await update_analysis_status(analysis_id, "completed", result_data)
-        logger.info(f"✅ Analysis {analysis_id} completed")
+        logger.info(f"Analysis {analysis_id} completed")
         
     except Exception as e:
-        logger.error(f"❌ Analysis failed: {e}", exc_info=True)
+        logger.error(f"Analysis failed: {e}", exc_info=True)
         await update_analysis_status(analysis_id, "failed", {
             "error": str(e),
             "progress": 100
         })
+
+
+async def poll_task_status(task_id: str, max_wait: int = 300, interval: int = 2) -> Dict[str, Any]:
+    """Poll task status until completion or timeout.
+
+    Returns the task status dict or a timeout dict.
+    """
+    deadline = datetime.now() + timedelta(seconds=max_wait)
+    while datetime.now() < deadline:
+        try:
+            status = await get_task_status(task_id)
+            if isinstance(status, dict):
+                state = status.get('status')
+                if state in ('completed', 'failed'):
+                    return status
+        except HTTPException as he:
+            # If not found, continue polling until timeout
+            if he.status_code == 404:
+                logger.debug(f"Task {task_id} not found yet, retrying...")
+            else:
+                logger.warning(f"Error while polling task {task_id}: {he}")
+                return {'task_id': task_id, 'status': 'error', 'message': str(he)}
+        except Exception as e:
+            logger.warning(f"Unexpected polling error for {task_id}: {e}")
+
+        await asyncio.sleep(interval)
+
+    logger.info(f"Polling timed out for task {task_id}")
+    return {'task_id': task_id, 'status': 'timeout', 'message': 'Polling timed out'}
 
 # ==================== ENDPOINTS ====================
 
@@ -873,13 +975,19 @@ async def analyze_neighborhood(
                 )
                 task_id = task.id
                 logger.info(f"Celery task created: {task_id}")
+                # register task mapping
+                create_task(task_id, 'analysis', {'analysis_id': analysis_id, 'address': analysis_request.address})
             except ImportError:
                 logger.warning("Celery task import failed")
                 use_celery = False
         
         if not use_celery:
             task_id = f"analysis_{analysis_id}"
+            # register task mapping for in-memory store
+            create_task(task_id, 'analysis', {'analysis_id': analysis_id, 'address': analysis_request.address})
+            # schedule background processing in a separate thread to avoid blocking the event loop
             background_tasks.add_task(
+                _run_coro_in_thread,
                 process_neighborhood_sync,
                 analysis_id,
                 analysis_request.address,
@@ -888,7 +996,21 @@ async def analyze_neighborhood(
                 analysis_request.include_buildings,
                 analysis_request.generate_map
             )
-            logger.info(f"Background task created: {task_id}")
+            logger.info(f"Background task scheduled: {task_id}")
+        # schedule a non-blocking poll to cache the final result (does not block response)
+        async def _poll_and_cache(tid: str, wait: int = 300):
+            try:
+                result = await poll_task_status(tid, max_wait=wait)
+                set_task_cache(tid, result, ttl=TASK_CACHE_DEFAULT_TTL)
+            except Exception as e:
+                logger.warning(f"Async poll failed for {tid}: {e}")
+
+        # create a non-blocking poll task
+        try:
+            asyncio.create_task(_poll_and_cache(task_id, 300))
+        except Exception:
+            # fallback: run the polling in a background thread
+            background_tasks.add_task(_run_coro_in_thread, _poll_and_cache, task_id, 300)
         
         return NeighborhoodAnalysisResponse(
             analysis_id=analysis_id,
@@ -907,50 +1029,147 @@ async def analyze_neighborhood(
 
 @app.get("/api/tasks/{task_id}")
 async def get_task_status(task_id: str):
-    """Get task status - FIXED with better error handling"""
+    """
+    FIXED: Get task status with proper fallback chain
+    """
+    logger.info(f"Checking status for task: {task_id}")
+    # fast path: check in-memory cache first
+    cached = get_task_cache(task_id)
+    if cached:
+        logger.debug(f"Cache hit for task {task_id}")
+        return cached
     
-    # First check if it's an analysis ID (not task ID)
+    # Strategy 1: Check if it's a background task (analysis_*)
     if task_id.startswith("analysis_"):
-        # Extract analysis ID
         analysis_id = task_id.replace("analysis_", "")
+        logger.info(f"Background task detected, checking analysis: {analysis_id}")
+        
         try:
             analysis = await get_neighborhood_analysis(analysis_id)
             if analysis:
                 status = analysis.get('status', 'unknown')
                 progress = analysis.get('progress', 0)
                 
+                # Map analysis status to task status
+                task_status = status
+                if status == 'processing':
+                    task_status = 'processing'
+                elif status == 'completed':
+                    task_status = 'completed'
+                elif status == 'failed':
+                    task_status = 'failed'
+                elif status == 'pending':
+                    task_status = 'pending'
+                
                 return {
                     'task_id': task_id,
-                    'status': status,
+                    'analysis_id': analysis_id,
+                    'status': task_status,
                     'progress': progress,
-                    'message': analysis.get('message', ''),
+                    'message': analysis.get('message', f'Analysis {status}'),
                     'result': analysis if status == 'completed' else None,
-                    'error': analysis.get('error')
+                    'error': analysis.get('error'),
+                    'address': analysis.get('address'),
+                    'walk_score': analysis.get('walk_score'),
+                    'total_amenities': analysis.get('total_amenities', 0)
                 }
         except Exception as e:
-            logger.error(f"Error getting analysis: {e}")
+            logger.error(f"Error fetching analysis {analysis_id}: {e}")
+            # Don't return here, try Celery next
     
-    # Check Celery if available
+    # Strategy 2: Check Celery if available
     if CELERY_AVAILABLE:
         try:
+            from celery.result import AsyncResult
             celery_task = AsyncResult(task_id, app=celery_app)
             state = celery_task.state
             
+            logger.info(f"Celery task state: {state}")
+            
+            # Map Celery states to our status
+            status_map = {
+                'PENDING': 'pending',
+                'STARTED': 'processing', 
+                'PROGRESS': 'processing',
+                'SUCCESS': 'completed',
+                'FAILURE': 'failed',
+                'RETRY': 'processing',
+                'REVOKED': 'failed'
+            }
+            
+            task_status = status_map.get(state, state.lower())
+            
+            # Get progress from Celery meta
+            progress = 0
+            if state == 'PROGRESS' and celery_task.info:
+                progress = celery_task.info.get('progress', 50)
+            elif state == 'SUCCESS':
+                progress = 100
+            
+            result_data = None
+            error_msg = None
+
+            if state == 'SUCCESS':
+                result_data = celery_task.result
+            elif state == 'FAILURE':
+                error_msg = str(celery_task.info) if celery_task.info else 'Task failed'
+
+            resp = {
+                'task_id': task_id,
+                'status': task_status,
+                'progress': progress,
+                'message': str(celery_task.info) if celery_task.info else f'Task {state}',
+                'result': result_data,
+                'error': error_msg
+            }
+            # cache celery result for quick reuse
+            try:
+                set_task_cache(task_id, resp, ttl=TASK_CACHE_DEFAULT_TTL)
+            except Exception:
+                logger.debug('Failed to set task cache for celery task')
+
+            return resp
+        except Exception as e:
+            logger.error(f"Celery lookup failed for {task_id}: {e}")
+            # Don't return here, check analysis by task_id next
+    
+    # Strategy 3: Check if task_id is actually an analysis_id
+    try:
+        analysis = await get_neighborhood_analysis(task_id)
+        if analysis:
+            logger.info(f"Found analysis using task_id as analysis_id")
+            status = analysis.get('status', 'unknown')
+            
             return {
                 'task_id': task_id,
-                'status': state.lower(),
-                'progress': 50 if state == 'PROGRESS' else 100 if state == 'SUCCESS' else 0,
-                'message': str(celery_task.info) if celery_task.info else '',
-                'result': celery_task.result if state == 'SUCCESS' else None,
-                'error': str(celery_task.info) if state == 'FAILURE' else None
+                'analysis_id': task_id,
+                'status': status,
+                'progress': analysis.get('progress', 0),
+                'message': analysis.get('message', f'Analysis {status}'),
+                'result': analysis if status == 'completed' else None,
+                'error': analysis.get('error')
             }
-        except Exception as e:
-            logger.error(f"Celery lookup failed: {e}")
+    except Exception as e:
+        logger.error(f"Error checking task_id as analysis_id: {e}")
     
-    # If task not found anywhere, return error
+    # Strategy 4: If nothing found, return helpful error
+    logger.warning(f"Task {task_id} not found in any system")
+    
     raise HTTPException(
         status_code=404,
-        detail=f"Task {task_id} not found. It may have expired or never existed."
+        detail={
+            "error": "Task not found",
+            "task_id": task_id,
+            "message": "Task may have expired or never existed",
+            "troubleshooting": {
+                "celery_available": CELERY_AVAILABLE,
+                "suggestions": [
+                    "Check if the task was created successfully",
+                    "Task results expire after 1 hour",
+                    "Check backend logs for errors"
+                ]
+            }
+        }
     )
 
 
@@ -1195,9 +1414,9 @@ async def get_stats(request: Request):
         raise HTTPException(status_code=500, detail=f"Failed to retrieve statistics: {str(e)}")
 
 
-@app.get("/api/debug/db_info")
-async def debug_db_info():
-    """Debug endpoint: show DB connection, properties count and samples"""
+@app.get("/api/debug/db_info/summary")
+async def debug_db_info_summary():
+    """Debug endpoint (summary): show DB connection, properties count and samples"""
     try:
         connected = await Database.is_connected()
         db = await Database.get_database()
@@ -1279,23 +1498,23 @@ async def store_property_vector(
             raise HTTPException(status_code=503, detail="Vector database not available")
         
         # Validate image exists
-        if not os.path.exists(request.image_path):
-            raise HTTPException(status_code=404, detail=f"Image not found: {request.image_path}")
-        
+        if not os.path.exists(payload.image_path):
+            raise HTTPException(status_code=404, detail=f"Image not found: {payload.image_path}")
+
         # Store embedding
         success = vector_db.store_property_embedding(
-            property_id=request.property_id,
-            address=request.address,
-            image_path=request.image_path,
-            metadata=request.metadata
+            property_id=payload.property_id,
+            address=payload.address,
+            image_path=payload.image_path,
+            metadata=payload.metadata
         )
-        
+
         if not success:
             raise HTTPException(status_code=500, detail="Failed to store embedding")
-        
+
         return {
             "success": True,
-            "property_id": request.property_id,
+            "property_id": payload.property_id,
             "message": "Property embedding stored",
             "timestamp": datetime.now().isoformat()
         }
