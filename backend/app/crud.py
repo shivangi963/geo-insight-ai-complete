@@ -2,7 +2,15 @@ from typing import List, Optional, Dict, Any
 from pydantic import BaseModel
 from bson import ObjectId
 from datetime import datetime, timedelta
-from .database import get_database
+import sys
+import os
+
+# Add the backend directory to Python path if needed
+backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if backend_dir not in sys.path:
+    sys.path.insert(0, backend_dir)
+
+from backend.app.database import get_database
 
 # Helper function to convert MongoDB document to dict
 def document_to_dict(doc: Dict) -> Dict:
@@ -25,29 +33,32 @@ class PropertyCRUD:
         try:
             db = await get_database()
             
-            # DEBUG: Log which DB we're using
-            print(f"\n🔍 DEBUG: Querying database '{db.name}', collection '{self.collection_name}'")
+            print(f"\n🔍 PropertyCRUD.get_all_properties() called")
+            print(f"   Database: {db.name}")
+            print(f"   Collection: {self.collection_name}")
+            print(f"   Skip: {skip}, Limit: {limit}")
             
-            # First, check count in the database
-            count_in_db = await db[self.collection_name].count_documents({})
-            print(f"   Total documents in collection: {count_in_db}")
+            # Check count
+            count = await db[self.collection_name].count_documents({})
+            print(f"   Total documents in collection: {count}")
             
-            if count_in_db == 0:
+            if count == 0:
                 print(f"   ⚠️  No documents found in {self.collection_name}")
                 return []
             
+            # Fetch documents
             cursor = db[self.collection_name].find().skip(skip).limit(limit)
             
             properties = []
             async for doc in cursor:
                 prop_dict = document_to_dict(doc)
                 properties.append(prop_dict)
-                print(f"   - Retrieved: {prop_dict.get('locality', prop_dict.get('address', 'N/A'))}")
             
             print(f"✅ Retrieved {len(properties)} properties from MongoDB")
-            if properties:
-                print(f"   First property keys: {list(properties[0].keys())}")
-                print(f"   First property address: {properties[0].get('address')}")
+            
+            if len(properties) > 0:
+                print(f"   First property: {properties[0].get('address', 'N/A')}")
+            
             return properties
             
         except Exception as e:
@@ -319,5 +330,6 @@ async def cleanup_stuck_analyses(max_age_minutes: int = 30):
     except Exception as e:
         print(f"❌ Error cleaning up stuck analyses: {e}")
         return 0
+
 # Create instance
 property_crud = PropertyCRUD()

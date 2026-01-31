@@ -905,7 +905,10 @@ async def get_properties_raw():
     """Get properties RAW without model validation - DEBUG ONLY"""
     try:
         logger.info("🔍 Raw properties endpoint called")
-        db = await Database.get_database()
+        
+        from backend.app.database import get_database
+        db = await get_database()
+        
         logger.info(f"Connected to database: {db.name}")
         
         # Direct query to MongoDB
@@ -925,11 +928,12 @@ async def get_properties_raw():
                 del doc["_id"]
             properties.append(doc)
         
-        logger.info(f"✅ Returned {len(properties)} properties")
+        logger.info(f"Returned {len(properties)} properties")
         return properties
     except Exception as e:
         logger.error(f"Failed to get properties: {e}", exc_info=True)
         return {"error": str(e)}
+
 
 @app.get("/api/properties", response_model=List[PropertyResponse])
 @limiter.limit("60/minute")
@@ -941,30 +945,40 @@ async def get_properties(
 ):
     """Get properties with filtering"""
     try:
-        properties = await property_crud.get_all_properties(skip=skip, limit=limit)
+        logger.info(f"🔍 /api/properties called - skip:{skip}, limit:{limit}, city:{city}")
         
+        properties = await property_crud.get_all_properties(skip=skip, limit=limit)
+        logger.info(f"   CRUD returned {len(properties)} properties")
+        
+        # Filter by city if specified
         if city:
             properties = [p for p in properties if p.get('city', '').lower() == city.lower()]
-        # Validate each item against PropertyResponse and log validation errors
-        valid_props: List[Dict[str, Any]] = []
-        validation_errors: List[Dict[str, Any]] = []
+            logger.info(f"   After city filter: {len(properties)} properties")
+        
+        # Validate each property against PropertyResponse
+        valid_props = []
+        validation_errors = []
 
         for p in properties:
             try:
-                validated = PropertyResponse.parse_obj(p)
-                valid_props.append(validated.dict())
+                validated = PropertyResponse.model_validate(p)
+                valid_props.append(validated)
             except ValidationError as ve:
                 logger.warning(f"Property validation failed (id={p.get('id')}): {ve}")
                 validation_errors.append({"id": p.get('id'), "errors": ve.errors()})
 
-        logger.info(f"Property validation: {len(valid_props)}/{len(properties)} passed, {len(validation_errors)} failed")
-        if validation_errors:
-            logger.debug(f"Validation errors sample: {validation_errors[:5]}")
+        logger.info(f" Validation: {len(valid_props)}/{len(properties)} passed")
+        
+        if validation_errors and len(validation_errors) < 5:
+            logger.debug(f"   Sample validation errors: {validation_errors[:3]}")
 
         return valid_props
+        
     except Exception as e:
-        logger.error(f"Failed to get properties: {e}")
+        logger.error(f"Failed to get properties: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to retrieve properties")
+    
+
 
 @app.post("/api/properties", response_model=PropertyResponse, status_code=201)
 @limiter.limit("30/minute")
@@ -1084,6 +1098,59 @@ async def analyze_neighborhood(
         logger.error(f"Failed to create analysis: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/debug/db_info/summary")
+async def debug_db_info_summary():
+    """Debug endpoint: show DB connection, properties count and samples"""
+    try:
+        from .database import Database
+        connected = await Database.is_connected()
+        db = await Database.get_database()
+
+        # Count properties
+        props_count = await db.properties.count_documents({})
+        
+        # Get samples
+        samples = []
+        cursor = db.properties.find().limit(5)
+        async for doc in cursor:
+            if '_id' in doc:
+                doc['id'] = str(doc['_id'])
+                del doc['_id']
+            samples.append({
+                'id': doc.get('id'),
+                'address': doc.get('address'),
+                'city': doc.get('city')
+            })
+
+        return {
+            "database": os.getenv('DATABASE_NAME', 'geoinsight_ai'),
+            "connected": connected,
+            "properties_count": props_count,
+            "sample_properties": samples
+        }
+    except Exception as e:
+        import traceback
+        return {"error": str(e), "traceback": traceback.format_exc()}
+
+@app.get("/api/test/direct-properties")
+async def test_direct_properties():
+    """Test endpoint - direct property access"""
+    from backend.app.crud import property_crud
+    from backend.app.database import get_database
+    
+    # Direct DB query
+    db = await get_database()
+    count = await db.properties.count_documents({})
+    
+    # CRUD query
+    properties = await property_crud.get_all_properties(skip=0, limit=10)
+    
+    return {
+        "db_count": count,
+        "crud_returned": len(properties),
+        "first_property": properties[0] if properties else None,
+        "all_properties": properties
+    }
 
 @app.get("/api/tasks/{task_id}")
 async def get_task_status(task_id: str):

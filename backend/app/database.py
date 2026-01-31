@@ -19,27 +19,57 @@ class Database:
             mongodb_url = os.getenv("MONGODB_URL", "mongodb://localhost:27017")
             database_name = os.getenv("DATABASE_NAME", "geoinsight_ai")
             
+            print(f"\n🔌 Attempting MongoDB connection...")
+            print(f"   URL: {mongodb_url}")
+            print(f"   Database: {database_name}")
+            
             try:
-                cls.client = AsyncIOMotorClient(mongodb_url, serverSelectionTimeoutMS=5000)
+                cls.client = AsyncIOMotorClient(
+                    mongodb_url, 
+                    serverSelectionTimeoutMS=5000,
+                    connectTimeoutMS=5000,
+                    socketTimeoutMS=5000
+                )
                 cls.db = cls.client[database_name]
                 
-                # Test connection
-                await cls.client.admin.command('ping')
-                cls._is_connected = True
-                print(f"✅ Connected to MongoDB successfully!")
-                print(f"   Database: {database_name}")
-                print(f"   URL: {mongodb_url}")
+                # Test connection with retry
+                max_retries = 3
+                for attempt in range(max_retries):
+                    try:
+                        await cls.client.admin.command('ping')
+                        cls._is_connected = True
+                        print(f"✅ Connected to MongoDB successfully!")
+                        print(f"   Database: {database_name}")
+                        
+                        # Verify collections exist
+                        collections = await cls.db.list_collection_names()
+                        print(f"   Collections: {collections}")
+                        
+                        # Count properties
+                        if 'properties' in collections:
+                            count = await cls.db.properties.count_documents({})
+                            print(f"   Properties count: {count}")
+                        
+                        break
+                    except Exception as e:
+                        if attempt < max_retries - 1:
+                            print(f"   Retry {attempt + 1}/{max_retries}...")
+                            await asyncio.sleep(1)
+                        else:
+                            raise
                 
             except Exception as e:
                 cls._is_connected = False
                 print(f"❌ MongoDB connection failed: {e}")
                 print("   Make sure MongoDB is running: 'net start MongoDB'")
+                print(f"   Connection string: {mongodb_url}")
                 raise
         
         return cls.db
     
     @classmethod
     async def is_connected(cls) -> bool:
+        """Check if database is connected"""
         if not cls._is_connected or cls.client is None or cls.db is None:
             return False
         try:
@@ -49,7 +79,6 @@ class Database:
             print(f"⚠️ Database connection check failed: {e}")
             cls._is_connected = False
             return False
-
     
     @classmethod
     async def get_database(cls):
@@ -83,12 +112,32 @@ def get_sync_database():
     mongodb_url = os.getenv("MONGODB_URL", "mongodb://localhost:27017")
     database_name = os.getenv("DATABASE_NAME", "geoinsight_ai")
     
+    print(f"\n🔌 Sync connection to MongoDB...")
+    print(f"   URL: {mongodb_url}")
+    print(f"   Database: {database_name}")
+    
     try:
-        client = MongoClient(mongodb_url, serverSelectionTimeoutMS=5000)
+        client = MongoClient(
+            mongodb_url, 
+            serverSelectionTimeoutMS=5000,
+            connectTimeoutMS=5000,
+            socketTimeoutMS=5000
+        )
         # Test connection
         client.admin.command('ping')
-        print(f"✅ Sync connection to MongoDB successful!")
-        return client[database_name]
+        
+        db = client[database_name]
+        
+        # Verify data
+        collections = db.list_collection_names()
+        print(f"   Collections: {collections}")
+        
+        if 'properties' in collections:
+            count = db.properties.count_documents({})
+            print(f"   Properties: {count}")
+        
+        print(f"✅ Sync connection successful!")
+        return db
     except Exception as e:
         print(f"❌ Sync MongoDB connection failed: {e}")
         raise
@@ -121,80 +170,15 @@ async def initialize_database():
         
         print("✅ Database indexes created")
         
-        # Load sample data if properties collection is empty
+        # Check if properties exist
         count = await db.properties.count_documents({})
+        print(f"✅ Found {count} properties in database")
+        
         if count == 0:
-            await load_sample_properties(db)
+            print("⚠️  WARNING: No properties in database!")
+            print("   Run: python load_kaggle_data.py")
         
     except Exception as e:
-        print(f"❌ Database initialization error: {e}")
-
-async def load_sample_properties(db):
-    """Load sample property data"""
-    from datetime import datetime
-    
-    sample_properties = [
-        {
-            "address": "123 Main St",
-            "city": "San Francisco",
-            "state": "CA",
-            "zip_code": "94105",
-            "price": 1500000,
-            "bedrooms": 3,
-            "bathrooms": 2.5,
-            "square_feet": 1800,
-            "property_type": "Single Family",
-            "latitude": 37.7749,
-            "longitude": -122.4194,
-            "created_at": datetime.now(),
-            "updated_at": datetime.now()
-        },
-        {
-            "address": "456 Oak Ave",
-            "city": "New York",
-            "state": "NY",
-            "zip_code": "10001",
-            "price": 1200000,
-            "bedrooms": 2,
-            "bathrooms": 2.0,
-            "square_feet": 1200,
-            "property_type": "Condo",
-            "latitude": 40.7128,
-            "longitude": -74.0060,
-            "created_at": datetime.now(),
-            "updated_at": datetime.now()
-        },
-        {
-            "address": "789 Pine Rd",
-            "city": "Austin",
-            "state": "TX",
-            "zip_code": "73301",
-            "price": 750000,
-            "bedrooms": 4,
-            "bathrooms": 3.0,
-            "square_feet": 2200,
-            "property_type": "Single Family",
-            "latitude": 30.2672,
-            "longitude": -97.7431,
-            "created_at": datetime.now(),
-            "updated_at": datetime.now()
-        },
-        {
-            "address": "MIT Campus, Manipal",
-            "city": "Manipal",
-            "state": "Karnataka",
-            "zip_code": "576104",
-            "price": 450000,
-            "bedrooms": 2,
-            "bathrooms": 2.0,
-            "square_feet": 1100,
-            "property_type": "Apartment",
-            "latitude": 13.3519,
-            "longitude": 74.7870,
-            "created_at": datetime.now(),
-            "updated_at": datetime.now()
-        }
-    ]
-    
-    result = await db.properties.insert_many(sample_properties)
-    print(f"✅ Loaded {len(result.inserted_ids)} sample properties")
+        print(f" Database initialization error: {e}")
+        import traceback
+        traceback.print_exc()
