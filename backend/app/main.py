@@ -932,7 +932,63 @@ async def get_properties_raw():
         return properties
     except Exception as e:
         logger.error(f"Failed to get properties: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
         return {"error": str(e)}
+
+
+
+
+    """Get all properties with pagination"""
+    try:
+        logger.info(f"🔍 GET /api/properties called (skip={skip}, limit={limit})")
+        
+        from backend.app.database import get_database
+        db = await get_database()
+        
+        # Query with pagination
+        cursor = db["properties"].find().skip(skip).limit(limit)
+        properties = []
+        
+        async for doc in cursor:
+            # Convert _id to id
+            if "_id" in doc:
+                doc["id"] = str(doc["_id"])
+                del doc["_id"]
+            properties.append(doc)
+        
+        logger.info(f"✅ Returned {len(properties)} properties")
+        return properties
+        
+    except Exception as e:
+        logger.error(f"Failed to get properties: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/properties")
+async def get_properties(skip: int = 0, limit: int = 100):
+    """Get all properties with pagination"""
+    try:
+        logger.info(f"🔍 GET /api/properties called (skip={skip}, limit={limit})")
+        
+        from backend.app.database import get_database
+        db = await get_database()
+        
+        # Query with pagination
+        cursor = db["properties"].find().skip(skip).limit(limit)
+        properties = []
+        
+        async for doc in cursor:
+            # Convert _id to id
+            if "_id" in doc:
+                doc["id"] = str(doc["_id"])
+                del doc["_id"]
+            properties.append(doc)
+        
+        logger.info(f"✅ Returned {len(properties)} properties")
+        return properties
+        
+    except Exception as e:
+        logger.error(f"Failed to get properties: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/api/properties", response_model=List[PropertyResponse])
@@ -945,7 +1001,7 @@ async def get_properties(
 ):
     """Get properties with filtering"""
     try:
-        logger.info(f"🔍 /api/properties called - skip:{skip}, limit:{limit}, city:{city}")
+        logger.info(f"/api/properties called - skip:{skip}, limit:{limit}, city:{city}")
         
         properties = await property_crud.get_all_properties(skip=skip, limit=limit)
         logger.info(f"   CRUD returned {len(properties)} properties")
@@ -1898,6 +1954,77 @@ async def general_exception_handler(request, exc):
             "request_id": request.state.get("request_id", "unknown")
         }
     )
+
+app.get("/api/properties/test-raw-v2")
+async def get_properties_test_raw_v2():
+    """EMERGENCY TEST ENDPOINT - bypasses cache"""
+    try:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info("🚨 EMERGENCY TEST ENDPOINT CALLED")
+        
+        from backend.app.database import get_database
+        db = await get_database()
+        
+        logger.info(f"✅ Connected to database: {db.name}")
+        
+        # Direct query
+        count = await db["properties"].count_documents({})
+        logger.info(f"📊 Property count in DB: {count}")
+        
+        if count == 0:
+            logger.warning("⚠️ Database is empty!")
+            return {"error": "No properties in database", "count": 0}
+        
+        # Fetch all
+        cursor = db["properties"].find().limit(100)
+        properties = []
+        
+        async for doc in cursor:
+            # Convert ObjectId to string
+            if "_id" in doc:
+                doc["id"] = str(doc["_id"])
+                del doc["_id"]
+            properties.append(doc)
+        
+        logger.info(f"✅ Returning {len(properties)} properties")
+        
+        return {
+            "success": True,
+            "count": len(properties),
+            "database": db.name,
+            "properties": properties
+        }
+        
+    except Exception as e:
+        import traceback
+        logger.error(f"❌ ERROR: {e}")
+        logger.error(traceback.format_exc())
+        return {
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }
+
+
+@app.get("/api/debug/verify-imports")
+async def verify_imports():
+    """Verify what version of code is loaded"""
+    import inspect
+    import backend.app.main as main_module
+    
+    # Get the source code of get_properties_raw
+    try:
+        source = inspect.getsource(main_module.get_properties_raw)
+        has_debug_log = "Raw properties endpoint called" in source
+    except:
+        source = "Could not get source"
+        has_debug_log = False
+    
+    return {
+        "has_debug_logging": has_debug_log,
+        "module_file": main_module.__file__,
+        "source_preview": source[:500]
+    }
 
 # ==================== STARTUP ====================
 
