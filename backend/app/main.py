@@ -688,6 +688,30 @@ except ImportError:
 
 # ==================== HELPER FUNCTIONS ====================
 
+@app.exception_handler(Exception)
+async def global_exception_handler(request, exc):
+    """
+    Global exception handler for better error reporting
+    """
+    logger.error(
+        f"Unhandled exception: {exc}",
+        extra={
+            "path": request.url.path,
+            "method": request.method,
+            "client": request.client.host if request.client else "unknown"
+        },
+        exc_info=True
+    )
+    
+    return JSONResponse(
+        status_code=500,
+        content={
+            "detail": str(exc),
+            "type": type(exc).__name__,
+            "path": request.url.path
+        }
+    )
+
 async def get_amenities_with_cache(address: str, radius: int, amenity_types: List[str]):
     """Get amenities with caching"""
     cache_key = f"amenities:{hashlib.md5(f'{address}:{radius}:{sorted(amenity_types)}'.encode()).hexdigest()}"
@@ -1501,59 +1525,129 @@ async def get_recent(
 async def analyze_image(
     request: Request,
     file: UploadFile = File(...),
-    analysis_type: str = Query("object_detection")
+    analysis_type: str = Query("object_detection", regex="^(object_detection|segmentation)$")
 ):
-
-    """Analyze uploaded image"""
-    try:
-        # Validate file type and size
+    try:    
+        logger.info(f"📸 Image analysis request: type={analysis_type}")
+        if file is None:
+            logger.error("No file uploaded")
+            raise HTTPException(
+                status_code=400,
+                detail="No image file provided"
+            )
+        
+        # ADD THIS CHECK TOO
+        if not hasattr(file, 'content_type') or file.content_type is None:
+            logger.error("File content_type is missing")
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid file upload - missing content type"
+            )
+        
+        # NOW check the content type
         if not file.content_type.startswith('image/'):
-            raise HTTPException(status_code=400, detail="File must be an image")
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid file type: {file.content_type}. Please upload an image."
+            )
         
         # Read file content
-        content = await file.read()
-        validate_file_size(len(content))
+        image_data = await file.read()
         
-        # Reset file pointer for reading again
-        await file.seek(0)
+        # Validate image size (optional but recommended)
+        max_size = 10 * 1024 * 1024  # 10MB
+        if len(image_data) > max_size:
+            raise HTTPException(
+                status_code=400,
+                detail="Image file too large. Maximum size is 10MB."
+            )
         
-        # Create temp file
-        temp_path = sanitize_path(settings.temp_dir, file.filename)
+        logger.info(f"📊 Image size: {len(image_data)} bytes")
         
-        # Save file
-        with open(temp_path, "wb") as f:
-            f.write(content)
+        # Convert to numpy array for YOLO
+        import numpy as np
+        from PIL import Image
+        import io
         
-        logger.info(f"Saved image: {temp_path}, size: {len(content)} bytes")
+        image = Image.open(io.BytesIO(image_data))
+        image_np = np.array(image)
         
-        # Create task ID
-        task_id = f"image_{int(datetime.now().timestamp())}"
+        logger.info(f"🖼️ Image dimensions: {image_np.shape}")
         
-        # Process with Celery if available
-        if CELERY_AVAILABLE:
-            try:
-                from .tasks.computer_vision_tasks import analyze_street_image_task
-                task = analyze_street_image_task.delay(str(temp_path), analysis_type)
-                task_id = task.id
-                logger.info(f"Celery image task created: {task_id}")
-            except ImportError:
-                logger.warning("Computer vision tasks not available")
+        # Perform analysis based on type
+        if analysis_type == "object_detection":
+            # Import YOLO model (make sure you have ultralytics installed)
+            from ultralytics import YOLO
+            
+            # Load model (you may need to adjust the model path)
+            model = YOLO('yolov8n.pt')  # or yolov8s.pt, yolov8m.pt, etc.
+            
+            # Run detection
+            results = model(image_np)
+            
+            # Extract detections
+            detections = []
+            for result in results:
+                boxes = result.boxes
+                for box in boxes:
+                    detection = {
+                        "class": result.names[int(box.cls[0])],
+                        "confidence": float(box.conf[0]),
+                        "bbox": box.xyxy[0].tolist()
+                    }
+                    detections.append(detection)
+            
+            logger.info(f"✅ Detected {len(detections)} objects")
+            
+            return {
+                "status": "success",
+                "analysis_type": "object_detection",
+                "detections": detections,
+                "total_objects": len(detections),
+                "image_size": {
+                    "width": image_np.shape[1],
+                    "height": image_np.shape[0]
+                }
+            }
         
-        return {
-            "task_id": task_id,
-            "filename": file.filename,
-            "analysis_type": analysis_type,
-            "file_size": len(content),
-            "status": "queued",
-            "poll_url": f"/api/tasks/{task_id}",
-            "message": "Image uploaded successfully"
-        }
-        
+        elif analysis_type == "segmentation":
+            # Segmentation analysis
+            from ultralytics import YOLO
+            
+            model = YOLO('yolov8n-seg.pt')  # Segmentation model
+            results = model(image_np)
+            
+            segments = []
+            for result in results:
+                if result.masks is not None:
+                    masks = result.masks
+                    boxes = result.boxes
+                    
+                    for mask, box in zip(masks, boxes):
+                        segment = {
+                            "class": result.names[int(box.cls[0])],
+                            "confidence": float(box.conf[0]),
+                            "mask_area": float(mask.data.sum())
+                        }
+                        segments.append(segment)
+            
+            logger.info(f"✅ Found {len(segments)} segments")
+            
+            return {
+                "status": "success",
+                "analysis_type": "segmentation",
+                "segments": segments,
+                "total_segments": len(segments)
+            }
+    
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Image analysis failed: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Image analysis failed: {str(e)}")
+        logger.error(f"Image analysis failed: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Image analysis failed: {str(e)}"
+        )
 
 # ==================== STATISTICS ====================
 
@@ -1707,76 +1801,98 @@ async def store_property_vector(
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/vector/search")
-@limiter.limit("30/minute")
 async def search_similar_properties(
-    request: Request,
     file: UploadFile = File(...),
-    limit: int = Query(5, ge=1, le=20),
+    limit: int = Query(3, ge=1, le=20),
     threshold: float = Query(0.7, ge=0.0, le=1.0)
 ):
-    """Search similar properties by image"""
+    """
+    Search for visually similar properties using image embeddings
+    
+    Args:
+        file: Query image
+        limit: Maximum number of results
+        threshold: Similarity threshold (0-1)
+    
+    Returns:
+        List of similar properties
+    """
     try:
-        if not VECTOR_DB_AVAILABLE or vector_db is None:
-            raise HTTPException(status_code=503, detail="Vector database not available")
+        logger.info(f"🔍 Vector search request: limit={limit}, threshold={threshold}")
         
-        # Validate file
+        # CRITICAL FIX: Check if file exists
+        if file is None:
+            logger.error("No file uploaded for vector search")
+            raise HTTPException(
+                status_code=400,
+                detail="No image file provided. Please upload an image to search."
+            )
+        
+        # CRITICAL FIX: Check if content_type exists
+        if not hasattr(file, 'content_type') or file.content_type is None:
+            logger.error(f"File upload missing content_type. File: {file}")
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid file upload. Please ensure you're uploading a valid image file."
+            )
+        
+        # Now safely check the content type
         if not file.content_type.startswith('image/'):
-            raise HTTPException(status_code=400, detail="File must be an image")
+            logger.warning(f"Invalid file type for vector search: {file.content_type}")
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid file type: {file.content_type}. Please upload an image."
+            )
         
-        # Read and validate size
-        content = await file.read()
-        validate_file_size(len(content))
+        logger.info(f"✅ Valid query image: {file.filename}, type: {file.content_type}")
         
-        # Create temp file
-        temp_path = sanitize_path(settings.temp_dir, file.filename)
-        with open(temp_path, "wb") as f:
-            f.write(content)
+        # Read image data
+        image_data = await file.read()
         
-        # Search
-        similar = vector_db.find_similar_properties(
-            image_path=str(temp_path),
+        # Validate size
+        max_size = 10 * 1024 * 1024  # 10MB
+        if len(image_data) > max_size:
+            raise HTTPException(
+                status_code=400,
+                detail="Image file too large. Maximum size is 10MB."
+            )
+        
+        # Generate embedding from query image
+        from PIL import Image
+        import io
+        
+        image = Image.open(io.BytesIO(image_data))
+        
+        # Use CLIP model to generate embedding
+        # (Make sure you have the vector database module properly initialized)
+        embedding = generate_image_embedding(image)  # Your embedding function
+        
+        # Search in Supabase vector database
+        results = await search_similar_embeddings(
+            embedding=embedding,
             limit=limit,
             threshold=threshold
         )
         
-        # Clean up
-        try:
-            os.remove(temp_path)
-        except:
-            pass
-        
-        if not similar:
-            return {
-                "query_image": file.filename,
-                "results": [],
-                "count": 0,
-                "message": "No similar properties found",
-                "threshold": threshold
-            }
-        
-        # Format results
-        results = []
-        for item in similar:
-            results.append({
-                "property_id": item.get("property_id"),
-                "address": item.get("address"),
-                "similarity": round(item.get("similarity", 0), 3),
-                "metadata": item.get("metadata", {})
-            })
+        logger.info(f"✅ Found {len(results)} similar properties")
         
         return {
+            "status": "success",
             "query_image": file.filename,
             "results": results,
-            "count": len(results),
-            "threshold": threshold,
-            "timestamp": datetime.now().isoformat()
+            "total_results": len(results),
+            "threshold": threshold
         }
     
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Vector search error: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Vector search error: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Vector search failed: {str(e)}"
+        )
+    
 
 @app.get("/api/vector/property/{property_id}")
 @limiter.limit("60/minute")

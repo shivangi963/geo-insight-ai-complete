@@ -2,6 +2,7 @@
 Image Analysis Page
 Computer vision analysis for property images
 """
+import requests
 import streamlit as st
 from api_client import api
 from utils import (
@@ -10,7 +11,7 @@ from utils import (
     format_number
 )
 from components.header import render_section_header
-from config import feature_config
+from config import feature_config, API_URL
 import plotly.express as px
 import plotly.graph_objects as go
 import pandas as pd
@@ -39,16 +40,19 @@ def render_image_analysis_page():
 
 def render_file_uploader(analysis_type: str):
     """Render file upload section"""
-    uploaded_file = st.file_uploader(
-        "📤 Upload Image",
-        type=['jpg', 'jpeg', 'png'],
-        help=f"Max {feature_config.max_file_size_mb}MB",
-        key="img_upload"
-    )
-    
-    if not uploaded_file:
-        render_upload_help()
-        return
+    # In frontend/app.py - Image Analysis section
+    uploaded_file = st.file_uploader("Upload street image", type=['jpg', 'jpeg', 'png'])
+
+    if uploaded_file is not None and st.button("Analyze Image"):
+        # Make sure to send it correctly
+        files = {
+            'file': (uploaded_file.name, uploaded_file, uploaded_file.type)
+        } 
+        response = requests.post(
+            f"{API_URL}/api/analysis/image",
+            files=files,
+            params={"analysis_type": "object_detection"}
+        )
     
     # Display uploaded image
     render_image_preview(uploaded_file)
