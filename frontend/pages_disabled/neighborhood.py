@@ -10,7 +10,7 @@ from utils import (
     init_session_state, get_session_state
 )
 from components.header import render_section_header
-from config import map_config
+from config import map_config, TASK_MAX_WAIT, TASK_POLL_INTERVAL
 import plotly.express as px
 
 def render_neighborhood_page():
@@ -135,7 +135,7 @@ def handle_analysis_submission(address: str, radius: int, amenities: list, gener
         st.info(f"**Task ID:** `{task_id}`")
     
     # Poll for results
-    result = poll_task_status(task_id, max_wait=120)
+    result = poll_task_status(task_id, max_wait=TASK_MAX_WAIT)
     
     if result:
         # Save to history

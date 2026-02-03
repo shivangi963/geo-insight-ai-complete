@@ -11,6 +11,62 @@ from utils import (
 from components.header import render_section_header
 from config import feature_config
 
+def search_similar_properties(api_url, query_image, limit=3, threshold=0.7):
+    """
+    Search for visually similar properties
+    
+    Args:
+        api_url: Base API URL
+        query_image: Streamlit UploadedFile object
+        limit: Maximum number of results
+        threshold: Similarity threshold
+    
+    Returns:
+        API response dictionary
+    """
+    import requests
+    
+    if query_image is None:
+        st.error("Please upload a query image first")
+        return None
+    
+    try:
+        # Reset file pointer
+        query_image.seek(0)
+        
+        # Create multipart payload
+        files = {
+            'file': (
+                query_image.name,
+                query_image,
+                query_image.type
+            )
+        }
+        
+        params = {
+            'limit': limit,
+            'threshold': threshold
+        }
+        
+        response = requests.post(
+            f"{api_url}/api/vector/search",
+            files=files,
+            params=params,
+            timeout=30
+        )
+        
+        if response.status_code == 200:
+            return response.json()
+        else:
+            error_detail = response.json().get('detail', f'HTTP {response.status_code}')
+            st.error(f"❌ Search failed: {error_detail}")
+            return None
+    
+    except Exception as e:
+        st.error(f"❌ Error: {str(e)}")
+        return None
+    
+
 def render_vector_search_page():
     """Main vector search page"""
     render_section_header("Vector Similarity Search", "🔍")
@@ -136,18 +192,19 @@ def render_search_image_preview(uploaded_file):
         st.info(f"**Size:** {uploaded_file.size / 1024:.1f} KB")
 
 def handle_vector_search(uploaded_file, limit: int, threshold: float):
-    """Execute vector similarity search"""
-    if not validate_file_size(uploaded_file, feature_config.max_file_size_mb):
+    """Execute vector similarity search - FIXED VERSION"""
+    from api_client import api
+    
+    if not validate_file_size(uploaded_file, 10):
         return
     
     st.divider()
     
+    # Use the new search function
     with st.spinner("🔍 Searching for similar properties..."):
-        file_content = uploaded_file.getvalue()
-        
-        result = api.vector_search(
-            file_content=file_content,
-            filename=uploaded_file.name,
+        result = search_similar_properties(
+            api_url=api.base_url,
+            query_image=uploaded_file,
             limit=limit,
             threshold=threshold
         )
@@ -164,7 +221,6 @@ def handle_vector_search(uploaded_file, limit: int, threshold: float):
         return
     
     show_success_message(f"Found {len(results)} similar properties")
-    
     render_search_results(results)
 
 def render_search_results(results: list):

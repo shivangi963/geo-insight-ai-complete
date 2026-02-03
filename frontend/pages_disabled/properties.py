@@ -12,6 +12,55 @@ from utils import (
 from components.header import render_section_header
 import time
 
+def safe_filter_properties(properties, city_filter, type_filter, bedrooms_filter):
+    """
+    Safely filter properties with proper type handling
+    
+    Args:
+        properties: List of property dictionaries
+        city_filter: Selected city filter value
+        type_filter: Selected property type filter value
+        bedrooms_filter: Selected bedrooms filter value
+    
+    Returns:
+        Filtered list of properties
+    """
+    filtered = properties
+    
+    # City filter - handle case-insensitive comparison
+    if city_filter != "All" and city_filter:
+        filtered = [
+            p for p in filtered
+            if str(p.get('city', '')).strip().lower() == str(city_filter).strip().lower()
+        ]
+    
+    # Property type filter
+    if type_filter != "All" and type_filter:
+        filtered = [
+            p for p in filtered
+            if str(p.get('property_type', '')).strip().lower() == str(type_filter).strip().lower()
+        ]
+    
+    # Bedrooms filter - handle both numeric and string comparisons
+    if bedrooms_filter != "All" and bedrooms_filter:
+        # Try to convert to int for numeric comparison
+        try:
+            bed_value = int(bedrooms_filter)
+            filtered = [
+                p for p in filtered
+                if int(p.get('bedrooms', 0)) == bed_value
+            ]
+        except (ValueError, TypeError):
+            # Fall back to string comparison
+            filtered = [
+                p for p in filtered
+                if str(p.get('bedrooms', '')).strip() == str(bedrooms_filter).strip()
+            ]
+    
+    return filtered
+
+
+
 def render_properties_page():
     """Main properties page renderer"""
     render_section_header("Property Management", "🏘️")
@@ -85,45 +134,54 @@ def render_property_metrics(df: pd.DataFrame):
             st.metric("🏙️ Cities", unique_cities)
 
 def render_property_filters(df: pd.DataFrame) -> pd.DataFrame:
-    """Render filters and return filtered DataFrame"""
+    """Render filters and return filtered DataFrame - TYPE-SAFE VERSION"""
     col1, col2, col3 = st.columns(3)
     
-    filtered_df = df.copy()
+    # Convert DataFrame to list of dicts for safe filtering
+    properties = df.to_dict('records')
     
     # City filter
     with col1:
         if 'city' in df.columns:
-            cities = ['All'] + sorted(df['city'].dropna().unique().tolist())
-            city_filter = st.selectbox("🏙️ City", cities, key="city_filter")
-            if city_filter != 'All':
-                filtered_df = filtered_df[filtered_df['city'] == city_filter]
+            cities = list(set([str(p.get('city', 'Unknown')).strip() for p in properties if p.get('city')]))
+            cities.sort()
+            city_filter = st.selectbox("🏙️ City", ["All"] + cities, key="city_filter")
+        else:
+            city_filter = "All"
     
     # Property type filter
     with col2:
         if 'property_type' in df.columns:
-            types = ['All'] + sorted(df['property_type'].dropna().unique().tolist())
-            type_filter = st.selectbox("🏠 Type", types, key="type_filter")
-            if type_filter != 'All':
-                filtered_df = filtered_df[filtered_df['property_type'] == type_filter]
+            types = list(set([str(p.get('property_type', 'Unknown')).strip() for p in properties if p.get('property_type')]))
+            types.sort()
+            type_filter = st.selectbox("🏠 Type", ["All"] + types, key="type_filter")
+        else:
+            type_filter = "All"
     
     # Bedrooms filter
     with col3:
         if 'bedrooms' in df.columns:
-            beds = ['All'] + sorted(df['bedrooms'].dropna().unique().tolist())
-            bed_filter = st.selectbox("🛏️ Bedrooms", beds, key="bed_filter")
-            if bed_filter != 'All':
-                filtered_df = filtered_df[filtered_df['bedrooms'] == bed_filter]
+            bedrooms = list(set([str(p.get('bedrooms', '0')).strip() for p in properties if p.get('bedrooms')]))
+            bedrooms.sort(key=lambda x: int(x) if x.isdigit() else 0)
+            bedrooms_filter = st.selectbox("🛏️ Bedrooms", ["All"] + bedrooms, key="bed_filter")
+        else:
+            bedrooms_filter = "All"
+    
+    # Apply safe filtering
+    filtered_properties = safe_filter_properties(properties, city_filter, type_filter, bedrooms_filter)
+    
+    # Convert back to DataFrame
+    filtered_df = pd.DataFrame(filtered_properties) if filtered_properties else pd.DataFrame()
     
     # Price range slider
-    if 'price' in df.columns and len(df) > 0:
+    if 'price' in df.columns and len(df) > 0 and len(filtered_df) > 0:
         min_p = int(df['price'].min())
         max_p = int(df['price'].max())
         if min_p < max_p:
             price_range = st.slider(
                 "💵 Price Range",
                 min_p, max_p, (min_p, max_p),
-                key="price_range",
-                format=format_currency
+                key="price_range"
             )
             filtered_df = filtered_df[
                 (filtered_df['price'] >= price_range[0]) &
@@ -131,6 +189,7 @@ def render_property_filters(df: pd.DataFrame) -> pd.DataFrame:
             ]
     
     return filtered_df
+
 
 def render_property_list(df: pd.DataFrame):
     """Render list of properties"""

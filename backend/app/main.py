@@ -1857,32 +1857,47 @@ async def search_similar_properties(
                 detail="Image file too large. Maximum size is 10MB."
             )
         
-        # Generate embedding from query image
-        from PIL import Image
-        import io
+        # ✅ FIX: Save image temporarily and use vector_db methods
+        import tempfile
+        import os
         
-        image = Image.open(io.BytesIO(image_data))
+        # Create temporary file
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as temp_file:
+            temp_file.write(image_data)
+            temp_path = temp_file.name
         
-        # Use CLIP model to generate embedding
-        # (Make sure you have the vector database module properly initialized)
-        embedding = generate_image_embedding(image)  # Your embedding function
+        try:
+            # ✅ FIX: Use vector_db instance methods
+            if not VECTOR_DB_AVAILABLE or vector_db is None:
+                raise HTTPException(
+                    status_code=503,
+                    detail="Vector database not available. Check SUPABASE configuration."
+                )
+            
+            # Use the find_similar_properties method from vector_db
+            results = await asyncio.to_thread(
+                vector_db.find_similar_properties,
+                image_path=temp_path,
+                limit=limit,
+                threshold=threshold
+            )
+            
+            logger.info(f"✅ Found {len(results)} similar properties")
+            
+            return {
+                "status": "success",
+                "query_image": file.filename,
+                "results": results,
+                "total_results": len(results),
+                "threshold": threshold
+            }
         
-        # Search in Supabase vector database
-        results = await search_similar_embeddings(
-            embedding=embedding,
-            limit=limit,
-            threshold=threshold
-        )
-        
-        logger.info(f"✅ Found {len(results)} similar properties")
-        
-        return {
-            "status": "success",
-            "query_image": file.filename,
-            "results": results,
-            "total_results": len(results),
-            "threshold": threshold
-        }
+        finally:
+            # Clean up temporary file
+            try:
+                os.unlink(temp_path)
+            except Exception as e:
+                logger.warning(f"Failed to delete temp file {temp_path}: {e}")
     
     except HTTPException:
         raise

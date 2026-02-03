@@ -80,59 +80,73 @@ def poll_task_status(task_id: str,
                     max_wait: int = TASK_MAX_WAIT,
                     show_progress: bool = TASK_PROGRESS_BAR_ENABLED) -> Optional[Dict]:
     """
-    Poll task status until complete or timeout
+    Poll task status until complete or timeout - IMPROVED VERSION
     Returns result dict or None if failed/timeout
     """
+    import time
+    import requests
+    from api_client import api
+    
     if show_progress:
         progress_bar = st.progress(0)
         status_text = st.empty()
     
     start_time = time.time()
+    poll_interval = 2  # Poll every 2 seconds
     
     while time.time() - start_time < max_wait:
-        data = api.get_task_status(task_id)
+        elapsed = time.time() - start_time
         
-        if not data:
-            if show_progress:
-                progress_bar.empty()
-                status_text.empty()
-            return None
-        
-        status = data.get('status', 'unknown')
-        progress = data.get('progress', 0)
-        message = data.get('message', '')
-        
-        if show_progress:
-            progress_bar.progress(min(progress / 100, 1.0))
+        try:
+            response = requests.get(
+                f"{api.base_url}/api/tasks/{task_id}",
+                timeout=5
+            )
             
-            if status == 'pending':
-                status_text.info(f"⏳ Queued: {message}")
-            elif status == 'processing':
-                status_text.info(f"⚙️ {message} ({progress}%)")
-            elif status == 'completed':
-                progress_bar.progress(1.0)
-                status_text.success("✅ Complete!")
-                time.sleep(0.5)
-                progress_bar.empty()
-                status_text.empty()
-                return data.get('result', {})
-            elif status == 'failed':
-                progress_bar.empty()
-                error = data.get('error', 'Unknown error')
-                status_text.error(f"❌ Failed: {error}")
-                return None
-        else:
-            if status == 'completed':
-                return data.get('result', {})
-            elif status == 'failed':
-                st.error(f"Task failed: {data.get('error')}")
-                return None
+            if response.status_code == 200:
+                data = response.json()
+                status = data.get('status', 'unknown')
+                progress = data.get('progress', 0)
+                message = data.get('message', '')
+                
+                if show_progress:
+                    # Update progress bar
+                    progress_bar.progress(min(progress / 100, 1.0))
+                    
+                    # Update status message
+                    if status == 'pending':
+                        status_text.info(f"⏳ Queued: {message} ({elapsed:.0f}s)")
+                    elif status == 'processing':
+                        status_text.info(f"⚙️ {message} ({progress}%) - {elapsed:.0f}s elapsed")
+                    elif status == 'completed':
+                        progress_bar.progress(1.0)
+                        status_text.success(f"✅ Complete in {elapsed:.0f}s!")
+                        time.sleep(0.5)
+                        progress_bar.empty()
+                        status_text.empty()
+                        return data.get('result', {})
+                    elif status == 'failed':
+                        progress_bar.empty()
+                        error = data.get('error', 'Unknown error')
+                        status_text.error(f"❌ Failed: {error}")
+                        return None
+                else:
+                    if status == 'completed':
+                        return data.get('result', {})
+                    elif status == 'failed':
+                        st.error(f"Task failed: {data.get('error')}")
+                        return None
+            
+        except Exception as e:
+            if show_progress:
+                status_text.warning(f"⚠️ Polling error: {str(e)}")
         
-        time.sleep(TASK_POLL_INTERVAL)
+        time.sleep(poll_interval)
     
+    # Timeout reached
     if show_progress:
         progress_bar.empty()
-        status_text.warning(f"⏱️ Timeout after {max_wait}s. Task: {task_id}")
+        status_text.warning(f"⏰ Analysis is taking longer than expected ({max_wait}s). Check 'Recent Analyses' tab for results.")
     
     return None
 

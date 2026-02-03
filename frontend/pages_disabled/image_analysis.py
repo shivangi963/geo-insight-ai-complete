@@ -16,6 +16,73 @@ import plotly.express as px
 import plotly.graph_objects as go
 import pandas as pd
 
+def upload_and_analyze_image(api_url, uploaded_file, analysis_type="object_detection"):
+    """
+    Properly upload image file to backend API
+    
+    Args:
+        api_url: Base API URL
+        uploaded_file: Streamlit UploadedFile object
+        analysis_type: Type of analysis to perform
+    
+    Returns:
+        API response dictionary
+    """
+    import requests
+    
+    if uploaded_file is None:
+        st.error("Please upload an image first")
+        return None
+    
+    try:
+        # Reset file pointer to beginning
+        uploaded_file.seek(0)
+        
+        # Create proper multipart/form-data payload
+        files = {
+            'file': (
+                uploaded_file.name,           # filename
+                uploaded_file,                # file object
+                uploaded_file.type            # content type
+            )
+        }
+        
+        # Add parameters
+        params = {
+            'analysis_type': analysis_type
+        }
+        
+        # Make request
+        response = requests.post(
+            f"{api_url}/api/analysis/image",
+            files=files,
+            params=params,
+            timeout=30
+        )
+        
+        # Handle response
+        if response.status_code == 200:
+            return response.json()
+        elif response.status_code == 400:
+            error_detail = response.json().get('detail', 'Bad request')
+            st.error(f"❌ Upload error: {error_detail}")
+            return None
+        elif response.status_code == 500:
+            error_detail = response.json().get('detail', 'Server error')
+            st.error(f"❌ Server error: {error_detail}")
+            return None
+        else:
+            st.error(f"❌ Unexpected error: HTTP {response.status_code}")
+            return None
+    
+    except requests.exceptions.Timeout:
+        st.error("⏰ Request timed out. Please try again.")
+        return None
+    except Exception as e:
+        st.error(f"❌ Error: {str(e)}")
+        return None
+    
+
 def render_image_analysis_page():
     """Main image analysis page"""
     render_section_header("Computer Vision Analysis", "📸")
@@ -102,41 +169,34 @@ def render_image_preview(uploaded_file):
             st.error(f"File too large! Max: {feature_config.max_file_size_mb}MB")
 
 def handle_image_analysis(uploaded_file, analysis_type: str):
-    """Handle image upload and analysis"""
+    """Handle image upload and analysis - FIXED VERSION"""
+    from api_client import api
+    
     # Validate file size
-    if not validate_file_size(uploaded_file, feature_config.max_file_size_mb):
+    if not validate_file_size(uploaded_file, 10):
         return
     
     st.divider()
     
-    # Upload file
-    with st.spinner("📤 Uploading image..."):
-        file_content = uploaded_file.getvalue()
-        
-        result = api.analyze_image(
-            file_content=file_content,
-            filename=uploaded_file.name,
+    # Use the new upload function
+    with st.spinner("📤 Uploading and analyzing image..."):
+        result = upload_and_analyze_image(
+            api_url=api.base_url,
+            uploaded_file=uploaded_file,
             analysis_type=analysis_type
         )
     
     if not result:
         return
     
-    task_id = result.get('task_id')
-    show_success_message(f"Upload successful! Task: {task_id}")
+    show_success_message("Analysis complete!")
     
-    # Poll for results
-    st.subheader("⚙️ Processing Image")
-    analysis_result = poll_task_status(task_id, max_wait=120)
-    
-    if analysis_result:
-        st.divider()
-        
-        # Display results based on type
-        if analysis_type == "object_detection":
-            render_object_detection_results(analysis_result)
-        else:
-            render_green_space_results(analysis_result)
+    # Display results based on type
+    if analysis_type == "object_detection":
+        render_object_detection_results(result)
+    else:
+        render_green_space_results(result)
+ 
 
 def render_object_detection_results(result: dict):
     """Display object detection results"""
