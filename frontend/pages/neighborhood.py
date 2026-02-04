@@ -256,10 +256,22 @@ def render_interactive_map(analysis_id: str):
     map_url = f"{api.base_url}/api/neighborhood/{analysis_id}/map"
     
     try:
-        st.components.v1.iframe(map_url, height=600, scrolling=True)
+        # Check if map endpoint is accessible
+        response = api.get(f"/api/neighborhood/{analysis_id}")
+        
+        if response:
+            map_path = response.get('map_path')
+            if map_path:
+                st.components.v1.iframe(map_url, height=700, scrolling=True, width=None)
+            else:
+                st.warning("⚠️ Map was not generated for this analysis")
+                st.info(f"Status: {response.get('status')}")
+        else:
+            st.error("❌ Could not load analysis data")
     except Exception as e:
-        st.error(f"Map display error: {e}")
-        st.info(f"[📍 Open map in new tab]({map_url})")
+        st.error(f"❌ Map display error: {e}")
+        st.info(f"Map URL: {map_url}")
+        st.info("Try opening the [map in new tab]({})" .format(map_url))
 
 def render_recent_analyses():
     """Render recent analyses list"""

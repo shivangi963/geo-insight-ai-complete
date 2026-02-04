@@ -12,6 +12,7 @@ import json
 from datetime import datetime
 import time
 from functools import wraps
+import math
 
 # ✅ FIXED: Configure OSM with timeouts
 ox.settings.log_console = True
@@ -119,7 +120,7 @@ class OpenStreetMapClient:
     address: str,
     radius: float = 1000,
     amenity_types: Optional[List[str]] = None,
-    max_results_per_type: int = 10
+    max_results_per_type: int = None
     ) -> Dict:
     
         if amenity_types is None:
@@ -128,10 +129,27 @@ class OpenStreetMapClient:
                 'park', 'supermarket', 'bank', 'pharmacy'
             ]
         
-        # Limit to 6 types to reduce timeout risk
-        if len(amenity_types) > 6:
-            print(f"Limiting {len(amenity_types)} amenity types to 6 for performance")
-            amenity_types = amenity_types[:6]
+        # Scale max results based on radius
+        # Larger radius = more amenities expected
+        if max_results_per_type is None:
+            if radius >= 5000:
+                max_results_per_type = 50  # Large radius: up to 50 per type
+            elif radius >= 2000:
+                max_results_per_type = 30  # Medium radius: up to 30 per type
+            else:
+                max_results_per_type = 20  # Small radius: up to 20 per type
+        
+        # Limit amenity types based on radius to prevent timeouts
+        # Larger radius = fewer queries needed
+        max_amenity_types = 6
+        if radius >= 5000:
+            max_amenity_types = 3  # Large radius: only 3 amenity types for speed
+        elif radius >= 2000:
+            max_amenity_types = 4  # Medium radius: 4 types
+        
+        if len(amenity_types) > max_amenity_types:
+            print(f"⏱️ Limiting {len(amenity_types)} amenity types to {max_amenity_types} for timeout prevention (radius: {radius}m)")
+            amenity_types = amenity_types[:max_amenity_types]
         
         try:
             # Geocode with timeout
@@ -161,16 +179,24 @@ class OpenStreetMapClient:
                 try:
                     print(f"Fetching {amenity}...")
                     
+                    # Adaptive timeout based on radius
+                    if radius >= 5000:
+                        query_timeout = 15  # Longer timeout for large radius
+                    elif radius >= 2000:
+                        query_timeout = 12
+                    else:
+                        query_timeout = 10  # Default timeout
+                    
                     # Use signal for timeout (Unix only)
                     import signal
                     
                     def timeout_handler(signum, frame):
-                        raise TimeoutError(f"Query timeout for {amenity}")
+                        raise TimeoutError(f"Query timeout for {amenity} after {query_timeout}s")
                     
                     try:
-                        # Set 10 second timeout per amenity type
+                        # Set adaptive timeout per amenity type
                         signal.signal(signal.SIGALRM, timeout_handler)
-                        signal.alarm(10)
+                        signal.alarm(query_timeout)
                         
                         amenities = ox.features.features_from_bbox(
                             north, south, east, west,
@@ -371,11 +397,13 @@ class OpenStreetMapClient:
             
             # Add amenity markers
             amenities = amenities_data.get("amenities", {})
+            marker_count = 0
             
             for amenity_type, items in amenities.items():
                 color = colors.get(amenity_type, 'gray')
                 
-                for item in items[:5]:  # Limit to 5 per type
+                # Show all items from the search, no arbitrary limit
+                for item in items:
                     try:
                         item_coords = item.get('coordinates', {})
                         item_lat = item_coords.get('latitude')
@@ -391,43 +419,38 @@ class OpenStreetMapClient:
                                 """,
                                 icon=folium.Icon(color=color, icon="info-sign")
                             ).add_to(m)
+                            marker_count += 1
                     except Exception as e:
                         # Skip problematic markers
                         continue
             
+            print(f"✅ Added {marker_count} amenity markers to map")
+            
             # Add search radius circle
+            search_radius = amenities_data.get("search_radius_m", 1000)
             folium.Circle(
-                radius=amenities_data.get("search_radius_m", 1000),
+                radius=search_radius,
                 location=[lat, lon],
                 color='crimson',
                 fill=True,
                 fill_color='crimson',
                 fill_opacity=0.1,
-                popup=f"Search Radius: {amenities_data.get('search_radius_m', 1000)}m"
+                popup=f"Search Radius: {search_radius}m"
             ).add_to(m)
-            
-            # Add legend
-            legend_html = '''
-            <div style="position: fixed; 
-                        bottom: 50px; left: 50px; width: 200px; height: auto; 
-                        background-color: white; z-index:9999; font-size:14px;
-                        border:2px solid grey; border-radius: 5px; padding: 10px">
-                <p><b>Legend</b></p>
-                <p><i class="fa fa-map-marker fa-2x" style="color:red"></i> Target Location</p>
-                <p><i class="fa fa-map-marker fa-2x" style="color:blue"></i> Restaurants</p>
-                <p><i class="fa fa-map-marker fa-2x" style="color:green"></i> Cafes</p>
-                <p><i class="fa fa-map-marker fa-2x" style="color:orange"></i> Schools</p>
-            </div>
-            '''
-            m.get_root().html.add_child(folium.Element(legend_html))
             
             # Save map
             import os
             os.makedirs(os.path.dirname(save_path) if os.path.dirname(save_path) else '.', exist_ok=True)
             m.save(save_path)
             
-            print(f"✅ Map saved to: {save_path}")
-            return save_path
+            # Verify file was created
+            if os.path.exists(save_path):
+                file_size = os.path.getsize(save_path)
+                print(f"✅ Map saved to: {save_path} ({file_size} bytes)")
+                return save_path
+            else:
+                print(f"❌ Map file was not created at: {save_path}")
+                return None
         
         except Exception as e:
             print(f"❌ Error creating map: {e}")
@@ -468,6 +491,11 @@ def calculate_walk_score(coordinates: Tuple[float, float], amenities_data: Dict)
             
             for item in items[:5]:
                 distance_km = item.get('distance_km', 10)
+                
+                # Handle NaN or invalid distances
+                if not isinstance(distance_km, (int, float)) or math.isnan(distance_km):
+                    distance_km = 10  # Default to 10km if invalid
+                
                 distance_m = distance_km * 1000
                 
                 # Distance-based scoring
@@ -481,7 +509,11 @@ def calculate_walk_score(coordinates: Tuple[float, float], amenities_data: Dict)
         
         if max_points > 0:
             normalized_score = (score / max_points) * 100
-            return round(min(normalized_score, 100), 1)
+            final_score = round(min(normalized_score, 100), 1)
+            # Ensure it's not NaN
+            if math.isnan(final_score):
+                return 0.0
+            return final_score
         
         return 0.0
     

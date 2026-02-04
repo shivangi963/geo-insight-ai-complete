@@ -6,10 +6,28 @@ from fastapi import APIRouter, HTTPException
 from typing import Dict, Any, Optional
 import logging
 from datetime import datetime
+import math
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
+
+
+def sanitize_floats(obj: Any) -> Any:
+    """
+    Recursively sanitize NaN and Inf values to None/valid numbers
+    JSON cannot serialize NaN, Inf, or -Inf
+    """
+    if isinstance(obj, float):
+        if math.isnan(obj) or math.isinf(obj):
+            return None  # Convert NaN/Inf to None
+        return obj
+    elif isinstance(obj, dict):
+        return {k: sanitize_floats(v) for k, v in obj.items()}
+    elif isinstance(obj, (list, tuple)):
+        return [sanitize_floats(item) for item in obj]
+    return obj
+
 
 # Check Celery availability
 CELERY_AVAILABLE = False
@@ -79,10 +97,10 @@ async def get_task_status(task_id: str):
                     'status': task_status,
                     'progress': progress,
                     'message': analysis.get('message', f'Analysis {status}'),
-                    'result': analysis if status == 'completed' else None,
+                    'result': sanitize_floats(analysis) if status == 'completed' else None,
                     'error': analysis.get('error'),
                     'address': analysis.get('address'),
-                    'walk_score': analysis.get('walk_score'),
+                    'walk_score': sanitize_floats(analysis.get('walk_score')),
                     'total_amenities': analysis.get('total_amenities', 0)
                 }
         except Exception as e:
@@ -121,7 +139,7 @@ async def get_task_status(task_id: str):
             error_msg = None
 
             if state == 'SUCCESS':
-                result_data = celery_task.result
+                result_data = sanitize_floats(celery_task.result)
             elif state == 'FAILURE':
                 error_msg = str(celery_task.info) if celery_task.info else 'Task failed'
 
@@ -150,7 +168,7 @@ async def get_task_status(task_id: str):
                 'status': status,
                 'progress': analysis.get('progress', 0),
                 'message': analysis.get('message', f'Analysis {status}'),
-                'result': analysis if status == 'completed' else None,
+                'result': sanitize_floats(analysis) if status == 'completed' else None,
                 'error': analysis.get('error')
             }
     except Exception as e:

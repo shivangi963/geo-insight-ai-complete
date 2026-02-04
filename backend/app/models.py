@@ -87,22 +87,19 @@ class BuildingFootprint(BaseModel):
 class NeighborhoodAnalysis(BaseModel):
     
     address: str
-    coordinates: Coordinates
+    coordinates: Optional[Dict[str, float]] = None  # Accept dict instead of strict Coordinates object
     search_radius_m: int = Field(default=1000, description="Search radius in meters")
-    amenities: Dict[str, List[Amenity]] = Field(default_factory=dict)
-    building_footprints: List[BuildingFootprint] = Field(default_factory=list)
+    amenities: Dict[str, List[Dict[str, Any]]] = Field(default_factory=dict)  # Accept generic dicts
+    building_footprints: List[Dict[str, Any]] = Field(default_factory=list)  # Accept generic dicts
     walk_score: Optional[float] = Field(None, ge=0, le=100, description="Walkability score")
     map_path: Optional[str] = Field(None, description="Path to interactive map HTML file")
-    analysis_date: datetime = Field(default_factory=datetime.now)
-    @field_validator('coordinates', mode='before')
-    @classmethod
-    def normalize_coordinates(cls, v):
-        if isinstance(v, dict):
-            if 'latitude' in v and 'longitude' in v:
-                return v
-            elif 'lat' in v and 'lon' in v:
-                return {'latitude': v['lat'], 'longitude': v['lon']}
-        return v
+    status: Optional[str] = Field(default="pending")
+    progress: Optional[int] = Field(default=0)
+    analysis_date: Optional[datetime] = Field(default_factory=datetime.now)
+    total_amenities: Optional[int] = None
+    amenity_categories: Optional[int] = None
+    
+    model_config = ConfigDict(from_attributes=True)
 
 class NeighborhoodAnalysisRequest(BaseModel):
    

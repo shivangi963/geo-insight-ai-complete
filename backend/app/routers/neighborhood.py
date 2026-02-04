@@ -201,6 +201,39 @@ async def analyze_neighborhood(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/recent")
+async def get_recent(limit: int = Query(10)):
+    """Get recent analyses"""
+    try:
+        analyses = await get_recent_analyses(limit)
+        
+        # If no analyses found, return empty list (not 404)
+        if not analyses:
+            return {"analyses": []}
+        
+        formatted_analyses = []
+        for analysis in analyses:
+            amenities = analysis.get('amenities', {})
+            total_amenities = sum(len(items) for items in amenities.values())
+            
+            formatted_analyses.append({
+                "analysis_id": str(analysis.get("id", analysis.get("_id", ""))),
+                "address": analysis.get("address", "Unknown"),
+                "status": analysis.get("status", "unknown"),
+                "walk_score": analysis.get("walk_score"),
+                "total_amenities": total_amenities,
+                "created_at": analysis.get("created_at"),
+                "map_available": bool(analysis.get("map_path")),
+                "amenity_categories": len(amenities)
+            })
+        
+        return {"analyses": formatted_analyses}
+        
+    except Exception as e:
+        logger.error(f"Failed to get recent analyses: {e}")
+        return {"analyses": []}  # Return empty list on error instead of 500
+
+
 @router.get("/{analysis_id}", response_model=NeighborhoodAnalysis)
 async def get_analysis(analysis_id: str):
     """Get analysis by ID"""
@@ -208,6 +241,16 @@ async def get_analysis(analysis_id: str):
         analysis = await get_neighborhood_analysis(analysis_id)
         if not analysis:
             raise HTTPException(status_code=404, detail="Analysis not found")
+        
+        # Convert coordinates from list to dict if needed
+        coordinates = analysis.get('coordinates')
+        if isinstance(coordinates, (list, tuple)) and len(coordinates) == 2:
+            analysis['coordinates'] = {
+                'latitude': coordinates[0],
+                'longitude': coordinates[1]
+            }
+        elif not isinstance(coordinates, dict):
+            analysis['coordinates'] = None
         
         amenities = analysis.get('amenities', {})
         analysis['total_amenities'] = sum(len(items) for items in amenities.values())
@@ -264,35 +307,3 @@ async def get_analysis_map(analysis_id: str):
     except Exception as e:
         logger.error(f"Failed to get map for {analysis_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
-@router.get("/recent", response_model=List[dict])
-async def get_recent(limit: int = Query(10)):
-    """Get recent analyses"""
-    try:
-        analyses = await get_recent_analyses(limit)
-        
-        # If no analyses found, return empty list (not 404)
-        if not analyses:
-            return []
-        
-        formatted_analyses = []
-        for analysis in analyses:
-            amenities = analysis.get('amenities', {})
-            total_amenities = sum(len(items) for items in amenities.values())
-            
-            formatted_analyses.append({
-                "analysis_id": str(analysis.get("id", analysis.get("_id", ""))),
-                "address": analysis.get("address", "Unknown"),
-                "status": analysis.get("status", "unknown"),
-                "walk_score": analysis.get("walk_score"),
-                "total_amenities": total_amenities,
-                "created_at": analysis.get("created_at"),
-                "map_available": bool(analysis.get("map_path")),
-                "amenity_categories": len(amenities)
-            })
-        
-        return formatted_analyses  # ← Return list directly, not wrapped in dict
-        
-    except Exception as e:
-        logger.error(f"Failed to get recent analyses: {e}")
-        raise HTTPException(status_code=500, detail="Failed to retrieve recent analyses")
