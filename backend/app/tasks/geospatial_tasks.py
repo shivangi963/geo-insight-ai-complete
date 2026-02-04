@@ -1,6 +1,7 @@
 """
 FIXED Geospatial Tasks - Proper sync database handling
 """
+import os
 from celery import shared_task
 from app.geospatial import OpenStreetMapClient, calculate_walk_score
 from app.database import get_sync_database
@@ -8,6 +9,9 @@ from typing import Dict
 from datetime import datetime
 from bson import ObjectId
 import traceback
+
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+MAPS_DIR = os.path.join(PROJECT_ROOT, "maps")
 
 def update_analysis_status_sync(db, analysis_id: str, status: str, updates: Dict = None):
     """Synchronous version for Celery tasks"""
@@ -127,9 +131,9 @@ def analyze_neighborhood_task(self, analysis_id: str, request_data: Dict) -> Dic
             
             try:
                 import os
-                os.makedirs("maps", exist_ok=True)
+                os.makedirs(MAPS_DIR, exist_ok=True)
                 map_filename = f"neighborhood_{analysis_id.replace('-', '_')}.html"
-                map_path = os.path.join("maps", map_filename)
+                map_path = os.path.join(MAPS_DIR, map_filename) 
                 
                 map_path = osm_client.create_map_visualization(
                     address=address,

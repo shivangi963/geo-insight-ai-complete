@@ -15,6 +15,8 @@ from ..crud import (
 )
 from ..geospatial import OpenStreetMapClient, calculate_walk_score
 
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/neighborhood", tags=["neighborhood"])
@@ -240,7 +242,11 @@ async def get_analysis_map(analysis_id: str):
         if not map_path:
             raise HTTPException(status_code=404, detail="Map not generated for this analysis")
         
-        # Check if file exists
+        # ✅ FIX: Convert relative path to absolute
+        if not os.path.isabs(map_path):
+            map_path = os.path.join(PROJECT_ROOT, map_path)
+        
+        # ✅ FIX: Now check with absolute path
         if not os.path.exists(map_path):
             raise HTTPException(
                 status_code=404, 

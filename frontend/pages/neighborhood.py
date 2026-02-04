@@ -240,7 +240,7 @@ def render_amenities_breakdown(amenities: dict):
                 with cols[idx % 3]:
                     display_name = get_amenity_display_name(atype)
                     with st.expander(f"{display_name} ({len(items)})"):
-                        for i, item in enumerate(items[:10], 1):
+                        for i, item in enumerate(items, 1):
                             name = item.get('name', 'Unknown')
                             dist = item.get('distance_km', 0)
                             st.write(f"**{i}. {name}**")
