@@ -55,7 +55,7 @@ except ImportError:
 if HAS_COMPONENTS:
     render_sidebar()
 else:
-    st.sidebar.title("⚙️ GeoInsight AI")
+    st.sidebar.title("GeoInsight AI")
     st.sidebar.info("Control Panel")
 
 # Render header
@@ -79,42 +79,42 @@ tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
 # Tab 1: Properties
 with tab1:
     try:
-        from pages_disabled.properties import render_properties_page
+        from pages.properties import render_properties_page
         render_properties_page()
     except Exception as e:
         st.error(f"❌ Error: {e}")
 
 with tab2:
     try:
-        from pages_disabled.neighborhood import render_neighborhood_page
+        from pages.neighborhood import render_neighborhood_page
         render_neighborhood_page()
     except Exception as e:
         st.error(f"❌ Error: {e}")
 
 with tab3:
     try:
-        from pages_disabled.ai_assistant import render_ai_assistant_page
+        from pages.ai_assistant import render_ai_assistant_page
         render_ai_assistant_page()
     except Exception as e:
         st.error(f"❌ Error: {e}")
 
 with tab4:
     try:
-        from pages_disabled.image_analysis import render_image_analysis_page
+        from pages.image_analysis import render_image_analysis_page
         render_image_analysis_page()
     except Exception as e:
         st.error(f"❌ Error: {e}")
 
 with tab5:
     try:
-        from pages_disabled.vector_search import render_vector_search_page
+        from pages.vector_search import render_vector_search_page
         render_vector_search_page()
     except Exception as e:
         st.error(f"❌ Error: {e}")
 
 with tab6:
     try:
-        from pages_disabled.dashboard import render_dashboard_page
+        from pages.dashboard import render_dashboard_page
         render_dashboard_page()
     except Exception as e:
         st.error(f"❌ Error: {e}")

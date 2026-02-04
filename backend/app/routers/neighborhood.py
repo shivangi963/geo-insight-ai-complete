@@ -1,9 +1,6 @@
-"""
-Neighborhood Analysis Router
-Extracted from main.py for better organization
-"""
 from fastapi import APIRouter, HTTPException, BackgroundTasks, Query
 from typing import List, Optional
+from fastapi.responses import FileResponse
 import logging
 from datetime import datetime
 import asyncio
@@ -22,10 +19,8 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/neighborhood", tags=["neighborhood"])
 
-# Initialize OSM client
 osm_client = OpenStreetMapClient()
 
-# Constants
 PROGRESS_START = 10
 PROGRESS_AMENITIES = 40
 PROGRESS_WALK_SCORE = 70
@@ -225,11 +220,54 @@ async def get_analysis(analysis_id: str):
         raise HTTPException(status_code=500, detail="Failed to retrieve analysis")
 
 
-@router.get("/recent")
+@router.get("/{analysis_id}/map")
+async def get_analysis_map(analysis_id: str):
+    """Get the interactive map for an analysis"""
+    try:
+        analysis = await get_neighborhood_analysis(analysis_id)
+        
+        if not analysis:
+            raise HTTPException(status_code=404, detail="Analysis not found")
+        
+        if analysis.get("status") != "completed":
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Analysis not completed yet. Status: {analysis.get('status')}"
+            )
+        
+        map_path = analysis.get("map_path")
+        
+        if not map_path:
+            raise HTTPException(status_code=404, detail="Map not generated for this analysis")
+        
+        # Check if file exists
+        if not os.path.exists(map_path):
+            raise HTTPException(
+                status_code=404, 
+                detail=f"Map file not found at {map_path}"
+            )
+        
+        return FileResponse(
+            map_path,
+            media_type="text/html",
+            filename=f"neighborhood_{analysis_id}.html"
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get map for {analysis_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/recent", response_model=List[dict])
 async def get_recent(limit: int = Query(10)):
     """Get recent analyses"""
     try:
         analyses = await get_recent_analyses(limit)
+        
+        # If no analyses found, return empty list (not 404)
+        if not analyses:
+            return []
         
         formatted_analyses = []
         for analysis in analyses:
@@ -247,11 +285,7 @@ async def get_recent(limit: int = Query(10)):
                 "amenity_categories": len(amenities)
             })
         
-        return {
-            "count": len(formatted_analyses),
-            "analyses": formatted_analyses,
-            "retrieved_at": datetime.now().isoformat()
-        }
+        return formatted_analyses  # ← Return list directly, not wrapped in dict
         
     except Exception as e:
         logger.error(f"Failed to get recent analyses: {e}")

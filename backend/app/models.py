@@ -1,5 +1,5 @@
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 from datetime import datetime
 
 
@@ -118,23 +118,15 @@ class NeighborhoodAnalysisRequest(BaseModel):
     generate_map: Optional[bool] = Field(default=True)
 
 class NeighborhoodAnalysisResponse(BaseModel):
-  
     analysis_id: str
-    address: str
     status: str
+    address: Optional[str] = None
     walk_score: Optional[float] = None
-    total_amenities: int
-    amenities: Dict[str, List[Amenity]] = Field(default_factory=dict)  
-    map_url: Optional[str] = None
-    created_at: datetime
-    @field_validator('created_at', mode='before')
-    @classmethod
-    def parse_created_at(cls, v):
-        if isinstance(v, str):
-            try:
-                
-                return datetime.fromisoformat(v.replace('Z', '+00:00'))
-            except:
-                
-                pass
-        return v
+    total_amenities: Optional[int] = None  
+    building_count: Optional[int] = None  
+    map_path: Optional[str] = None
+    coordinates: Optional[Tuple[float, float]] = None
+    amenities: Optional[Dict[str, List[Dict[str, Any]]]] = None
+    timestamp: Optional[str] = None
+    task_id: Optional[str] = None
+    message: Optional[str] = None

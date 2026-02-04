@@ -72,3 +72,5 @@ pagination_config = PaginationConfig()
 TASK_POLL_INTERVAL = 3  # seconds
 TASK_MAX_WAIT = 300 # seconds
 TASK_PROGRESS_BAR_ENABLED = True
+
+API_URL = api_config.base_url 
