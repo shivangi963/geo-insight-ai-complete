@@ -1,3 +1,7 @@
+"""
+Neighborhood Analysis Page - Simplified Version
+Map display features removed
+"""
 import streamlit as st
 from api_client import api
 from utils import (
@@ -8,25 +12,27 @@ from utils import (
 from components.header import render_section_header
 from config import map_config, TASK_MAX_WAIT, TASK_POLL_INTERVAL
 import plotly.express as px
+import requests
 
 def render_neighborhood_page():
-
     render_section_header("Neighborhood Intelligence")
     
     st.markdown("Analyze any location for amenities, walkability, and local insights using OpenStreetMap data.")
     default_address = get_session_state('nav_to_analysis', '')
     
-    render_analysis_form(default_address)
+    # Analysis form
+    analysis_triggered = render_analysis_form(default_address)
     
     st.divider()
-
+    
+    # Recent analyses
     render_recent_analyses()
 
-def render_analysis_form(default_address: str = ''):
-    
+def render_analysis_form(default_address: str = '') -> bool:
+    """Render form and return True if analysis was triggered"""
     with st.form("neighborhood_form"):
         address = st.text_input(
-            "Enter Full Address",
+            "📍 Enter Full Address",
             value=default_address,
             placeholder="e.g., MIT Campus, Manipal, Karnataka, India",
             help="More specific = better results"
@@ -36,43 +42,53 @@ def render_analysis_form(default_address: str = ''):
         
         with col1:
             radius = st.slider(
-                " Search Radius (meters)", 
+                "🔍 Search Radius (meters)", 
                 map_config.min_radius, 
                 map_config.max_radius, 
                 map_config.default_radius, 
                 100
             )
         
-        with col2:
-            generate_map = st.checkbox("Generate Interactive Map", value=True)
-        
-        st.markdown("###  Select Amenities")
+        st.markdown("### 📍 Select Amenities")
         
         amenities_selected = render_amenity_selector()
         
+        # Submit button (inside form)
         submitted = st.form_submit_button(
-            "Start Analysis", 
+            "🚀 Start Analysis", 
             type="primary", 
             use_container_width=True
         )
+    
+    # Handle submission OUTSIDE the form
+    if submitted:
+        if not address:
+            show_error_message("Please enter an address")
+            return False
         
-        if submitted:
-            handle_analysis_submission(address, radius, amenities_selected, generate_map)
+        if not amenities_selected:
+            show_error_message("Select at least one amenity type")
+            return False
+        
+        handle_analysis_submission(address, radius, amenities_selected)
+        return True
+    
+    return False
 
 def render_amenity_selector() -> list:
-    
+    """Render amenity checkboxes"""
     amenity_options = {
-        " Restaurants": "restaurant",
-        " Cafes": "cafe",
-        " Schools": "school",
-        " Hospitals": "hospital",
-        " Parks": "park",
-        " Supermarkets": "supermarket",
-        " Banks": "bank",
-        " Pharmacies": "pharmacy",
-        " Gyms": "gym",
-        " Libraries": "library",
-        " Transit": "transit_station"
+        "🍽️ Restaurants": "restaurant",
+        "☕ Cafes": "cafe",
+        "🏫 Schools": "school",
+        "🏥 Hospitals": "hospital",
+        "🌳 Parks": "park",
+        "🛒 Supermarkets": "supermarket",
+        "🏦 Banks": "bank",
+        "💊 Pharmacies": "pharmacy",
+        "💪 Gyms": "gym",
+        "📚 Libraries": "library",
+        "🚇 Transit": "transit_station"
     }
     
     cols = st.columns(4)
@@ -88,18 +104,10 @@ def render_amenity_selector() -> list:
     
     return amenities_selected
 
-def handle_analysis_submission(address: str, radius: int, amenities: list, generate_map: bool):
-    
-    if not address:
-        show_error_message("Please enter an address")
-        return
-    
-    if not amenities:
-        show_error_message("Select at least one amenity type")
-        return
-    
+def handle_analysis_submission(address: str, radius: int, amenities: list):
+    """Handle analysis submission - OUTSIDE form context"""
     st.divider()
-    st.subheader("Running Analysis")
+    st.subheader("🔄 Running Analysis")
     
     with st.spinner("Creating analysis task..."):
         response = api.start_neighborhood_analysis({
@@ -107,7 +115,7 @@ def handle_analysis_submission(address: str, radius: int, amenities: list, gener
             "radius_m": radius,
             "amenity_types": amenities,
             "include_buildings": False,
-            "generate_map": generate_map
+            "generate_map": True
         })
     
     if not response:
@@ -124,11 +132,11 @@ def handle_analysis_submission(address: str, radius: int, amenities: list, gener
     with col2:
         st.info(f"**Task ID:** `{task_id}`")
     
-
+    # Poll for results
     result = poll_task_status(task_id, max_wait=TASK_MAX_WAIT)
     
     if result:
-        
+        # Save to history
         history = get_session_state('analysis_history', [])
         history.append({
             'address': address,
@@ -136,19 +144,18 @@ def handle_analysis_submission(address: str, radius: int, amenities: list, gener
             'walk_score': result.get('walk_score'),
             'total_amenities': result.get('total_amenities')
         })
-        st.session_state.analysis_history = history[-10:]  
+        st.session_state.analysis_history = history[-10:]
         
-        display_analysis_results(result, analysis_id, generate_map)
+        # Display results
+        display_analysis_results(result, analysis_id)
 
-def display_analysis_results(result: dict, analysis_id: str, generate_map: bool):
-    
+def display_analysis_results(result: dict, analysis_id: str, generate_map: bool = True):
+    """Display analysis results"""
     st.divider()
-    st.subheader(" Analysis Results")
+    st.subheader("✅ Analysis Results")
     
     render_key_metrics(result)
-    
     render_walkability_interpretation(result.get('walk_score', 0))
-    
     
     amenities = result.get('amenities', {})
     if amenities:
@@ -158,52 +165,52 @@ def display_analysis_results(result: dict, analysis_id: str, generate_map: bool)
         render_interactive_map(analysis_id)
 
 def render_key_metrics(result: dict):
-    
+    """Render key metrics cards"""
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
         walk_score = result.get('walk_score', 0)
-        st.metric("Walk Score", f"{walk_score:.1f}/100")
+        st.metric("🚶 Walk Score", f"{walk_score:.1f}/100")
     
     with col2:
         total = result.get('total_amenities', 0)
-        st.metric("Amenities", format_number(total))
+        st.metric("📍 Amenities", format_number(total))
     
     with col3:
         coords = result.get('coordinates')
         if coords:
-            st.metric("Latitude", f"{coords[0]:.4f}")
+            st.metric("🌐 Latitude", f"{coords[0]:.4f}")
     
     with col4:
         if coords:
-            st.metric("Longitude", f"{coords[1]:.4f}")
+            st.metric("🌐 Longitude", f"{coords[1]:.4f}")
 
 def render_walkability_interpretation(walk_score: float):
-    
+    """Display walkability interpretation"""
     st.divider()
     
     label, css_class = get_walkability_label(walk_score)
     
     if walk_score >= 90:
-        st.success("Walker's Paradise! Daily errands do not require a car.")
+        st.success("🏆 Walker's Paradise! Daily errands do not require a car.")
     elif walk_score >= 70:
-        st.success("Very Walkable! Most errands can be accomplished on foot.")
+        st.success("✅ Very Walkable! Most errands can be accomplished on foot.")
     elif walk_score >= 50:
-        st.info("Somewhat Walkable. Some amenities within walking distance.")
+        st.info("🚶 Somewhat Walkable. Some amenities within walking distance.")
     elif walk_score >= 25:
-        st.warning("Car-Dependent. Most errands require a car.")
+        st.warning("🚗 Car-Dependent. Most errands require a car.")
     else:
-        st.error("Very Car-Dependent. Almost all errands require a car.")
+        st.error("🚙 Very Car-Dependent. Almost all errands require a car.")
 
 def render_amenities_breakdown(amenities: dict):
-    
+    """Render amenities chart and list"""
     st.divider()
-    st.subheader(" Amenities Found")
+    st.subheader("📊 Amenities Found")
     
     amenity_counts = {k.replace('_', ' ').title(): len(v) for k, v in amenities.items() if v}
     
     if amenity_counts:
-       
+        # Bar chart
         fig = px.bar(
             x=list(amenity_counts.keys()),
             y=list(amenity_counts.values()),
@@ -215,7 +222,8 @@ def render_amenities_breakdown(amenities: dict):
         fig.update_layout(showlegend=False)
         st.plotly_chart(fig, use_container_width=True)
         
-        st.markdown("###  Nearby Places")
+        # Detailed list
+        st.markdown("### 📍 Nearby Places")
         
         cols = st.columns(3)
         
@@ -228,84 +236,93 @@ def render_amenities_breakdown(amenities: dict):
                             name = item.get('name', 'Unknown')
                             dist = item.get('distance_km', 0)
                             st.write(f"**{i}. {name}**")
-                            st.caption(f" {dist:.2f} km away")
+                            st.caption(f"📏 {dist:.2f} km away")
     else:
-        st.info("No amenities found in the search radius")
-
+        st.info("ℹ️ No amenities found in the search radius")
 
 def render_interactive_map(analysis_id: str):
-   
+    """Display interactive map"""
     st.divider()
-    st.subheader(" Interactive Map")
+    st.subheader("🗺️ Interactive Map")
     
     map_url = f"{api.base_url}/api/neighborhood/{analysis_id}/map"
     
     try:
-       
+        # Verify analysis
         response = api.get(f"/api/neighborhood/{analysis_id}")
         
         if not response:
-            st.error(" Could not load analysis data")
+            st.error("❌ Could not load analysis data")
             return
         
         status = response.get('status')
         map_path = response.get('map_path')
         
         if status != "completed":
-            st.warning(f"Analysis not completed yet. Current status: {status}")
+            st.warning(f"⏳ Analysis not completed yet. Status: {status}")
             return
         
         if not map_path:
-            st.warning("Map was not generated for this analysis")
+            st.warning("⚠️ Map was not generated for this analysis")
             return
         
-        st.components.v1.iframe(
-            map_url, 
-            width=None,  
-            height=700, 
-            scrolling=True
-        )
-        
-        
-        st.markdown(f"""
-        **Map not loading?** [Open in new tab]({map_url}) 
-        """)
+        # Fetch and display map
+        with st.spinner("Loading map..."):
+            try:
+                # Fetch HTML content from backend
+                html_response = requests.get(map_url, timeout=10)
+                
+                if html_response.status_code == 200:
+                    html_content = html_response.text
+                    
+                    # Display using Streamlit's HTML component
+                    st.components.v1.html(
+                        html_content,
+                        height=700,
+                        scrolling=True
+                    )
+                    
+                else:
+                    st.error(f"❌ Failed to load map: HTTP {html_response.status_code}")
+            
+            except requests.exceptions.RequestException as e:
+                st.error(f"❌ Network error: {e}")
         
     except Exception as e:
-        st.error(f"Map display error: {e}")
-        st.markdown(f"[Open map directly]({map_url})")
-
+        st.error(f"❌ Error: {e}")
 
 def render_recent_analyses():
-   
-    st.subheader(" Recent Analyses")
+    """Render recent analyses list"""
+    st.subheader("📜 Recent Analyses")
     
     recent = api.get("/api/neighborhood/recent", params={"limit": 10})
     
     if not recent:
-        st.info("No recent analyses")
+        st.info("ℹ️ No recent analyses available")
         return
     
     analyses = recent.get('analyses', [])
     
     if not analyses:
-        st.info("No analyses yet. Start your first analysis above!")
+        st.info("📭 No analyses yet. Start your first analysis above!")
         return
     
     for analysis in analyses:
         render_analysis_card(analysis)
 
 def render_analysis_card(analysis: dict):
-    
+    """Render analysis card"""
     status = analysis.get('status', 'unknown')
     address = analysis.get('address', 'Unknown')
     
-    status_emoji = {
-        'completed',
-        'processing',
-        'pending',
-        'failed'
-    }.get(status)
+    # Status emoji map
+    status_emoji_map = {
+        'completed': '✅',
+        'processing': '⏳',
+        'pending': '🕐',
+        'failed': '❌'
+    }
+    status_emoji = status_emoji_map.get(status, '❓')
     
     with st.expander(f"{status_emoji} {address}"):
         col1, col2, col3 = st.columns(3)
@@ -319,15 +336,13 @@ def render_analysis_card(analysis: dict):
         with col2:
             total = analysis.get('total_amenities', 0)
             st.write(f"**Amenities:** {total}")
-            has_map = analysis.get('map_available', False)
         
         with col3:
             created = analysis.get('created_at', 'N/A')
             st.write(f"**Created:** {created}")
             
             analysis_id = analysis.get('analysis_id')
-            if analysis_id and st.button("View Full", key=f"view_{analysis_id}"):
-             
+            if analysis_id and st.button("👁️ View Details", key=f"view_{analysis_id}"):
                 full_analysis = api.get_analysis(analysis_id)
                 if full_analysis:
-                    display_analysis_results(full_analysis, analysis_id, True)
+                    display_analysis_results(full_analysis, analysis_id)
