@@ -1,14 +1,14 @@
 """
-FIXED Geospatial Tasks - Proper sync database handling
+FIXED Geospatial Tasks - All errors resolved
 """
 import os
+import traceback  # ✅ FIX 1: Add missing import
 from celery import shared_task
 from app.geospatial import OpenStreetMapClient, calculate_walk_score
 from app.database import get_sync_database
 from typing import Dict
 from datetime import datetime
 from bson import ObjectId
-import traceback
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 MAPS_DIR = os.path.join(PROJECT_ROOT, "maps")
@@ -51,6 +51,7 @@ def analyze_neighborhood_task(self, analysis_id: str, request_data: Dict) -> Dic
     FIXED: Analyze neighborhood using synchronous database
     """
     db = None
+    map_path = None  # ✅ FIX 2: Initialize map_path outside try block
     
     try:
         # Get sync database connection
@@ -120,8 +121,7 @@ def analyze_neighborhood_task(self, analysis_id: str, request_data: Dict) -> Dic
             except Exception as e:
                 print(f"⚠️ Building footprints failed: {e}")
         
-        # Generate map
-        map_path = None
+        # ✅ FIX 3: Generate map with proper path handling
         if generate_map and coordinates:
             self.update_state(state='PROGRESS', meta={
                 'status': 'Generating interactive map...',
@@ -130,25 +130,43 @@ def analyze_neighborhood_task(self, analysis_id: str, request_data: Dict) -> Dic
             update_analysis_status_sync(db, analysis_id, 'processing', {'progress': 80})
             
             try:
-                import os
+                # Create maps directory
                 os.makedirs(MAPS_DIR, exist_ok=True)
-                map_filename = f"neighborhood_{analysis_id.replace('-', '_')}.html"
-                map_path = os.path.join(MAPS_DIR, map_filename) 
                 
-                map_path = osm_client.create_map_visualization(
+                # Create filename
+                map_filename = f"neighborhood_{analysis_id.replace('-', '_')}.html"
+                map_absolute_path = os.path.join(MAPS_DIR, map_filename)
+                
+                print(f"📁 Generating map at: {map_absolute_path}")
+                
+                # Create map
+                result_path = osm_client.create_map_visualization(
                     address=address,
                     amenities_data=amenities_data,
-                    save_path=map_path
+                    save_path=map_absolute_path
                 )
-            except Exception as e:
-                print(f"⚠️ Map generation failed: {e}")
-                map_path = None
+                
+                # ✅ FIX 4: Verify map was created
+                if result_path and os.path.exists(result_path):
+                    # Store relative path for portability
+                    map_path = f"maps/{map_filename}"
+                    print(f"✅ Map created successfully: {map_path}")
+                    print(f"   Absolute path: {result_path}")
+                    print(f"   Size: {os.path.getsize(result_path):,} bytes")
+                else:
+                    print(f"⚠️ Map generation returned no valid path")
+                    map_path = None
+                    
+            except Exception as map_error:
+                print(f"❌ Map generation failed: {map_error}")
+                traceback.print_exc()
+                map_path = None  # Ensure map_path is None on error
         
         # Calculate totals
         amenities = amenities_data.get("amenities", {})
         total_amenities = sum(len(items) for items in amenities.values())
         
-        # Prepare results
+        # ✅ FIX 5: Prepare results with guaranteed map_path
         results = {
             'analysis_id': analysis_id,
             'status': 'completed',
@@ -156,7 +174,7 @@ def analyze_neighborhood_task(self, analysis_id: str, request_data: Dict) -> Dic
             'walk_score': walk_score,
             'total_amenities': total_amenities,
             'building_count': len(building_footprints),
-            'map_path': map_path,
+            'map_path': map_path,  # Will be None if map failed
             'coordinates': coordinates,
             'amenities': amenities,
             'timestamp': datetime.now().isoformat()
@@ -180,12 +198,13 @@ def analyze_neighborhood_task(self, analysis_id: str, request_data: Dict) -> Dic
         print(f"   Address: {address}")
         print(f"   Amenities: {total_amenities}")
         print(f"   Walk Score: {walk_score}")
+        print(f"   Map: {'✅ Created' if map_path else '❌ Not created'}")
         
         return results
         
     except Exception as e:
         error_msg = str(e)
-        error_trace = traceback.format_exc()
+        error_trace = traceback.format_exc()  # ✅ FIX 6: Now traceback is imported
         
         print(f"❌ Analysis failed: {error_msg}")
         print(f"Traceback:\n{error_trace}")

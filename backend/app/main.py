@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
+from fastapi.staticfiles import StaticFiles
 from typing import Dict, Any
 import logging
 import os
@@ -36,7 +37,6 @@ class Settings(BaseModel):
 settings = Settings()
 
 # ==================== LOGGING ====================
-
 logging.basicConfig(
     level=logging.INFO if not settings.debug else logging.DEBUG,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -223,7 +223,14 @@ app.include_router(debug_stats.router)
 if WORKFLOW_ENABLED:
     app.include_router(workflow_router, prefix="/api/workflow", tags=["workflow"])
 
-logger.info("✅ All routers registered")
+logger.info(" All routers registered")
+
+BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
+MAPS_DIR = os.path.join(os.path.dirname(BACKEND_DIR), "maps")
+os.makedirs(MAPS_DIR, exist_ok=True)
+
+app.mount("/static/maps", StaticFiles(directory=MAPS_DIR), name="maps")
+logger.info(f"Static maps mounted: {MAPS_DIR}")
 
 # ==================== ROOT ENDPOINTS ====================
 
@@ -279,7 +286,7 @@ async def health_check():
             "features": {},
             "error": str(e)
         }
-
+    
 # ==================== ERROR HANDLERS ====================
 
 @app.exception_handler(HTTPException)

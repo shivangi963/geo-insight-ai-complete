@@ -13,6 +13,7 @@ from datetime import datetime
 import time
 from functools import wraps
 import math
+import os
 
 # ✅ FIXED: Configure OSM with timeouts
 ox.settings.log_console = True
@@ -355,9 +356,7 @@ class OpenStreetMapClient:
         amenities_data: Dict,
         save_path: str = "map.html"
     ) -> Optional[str]:
-        """
-        FIXED: Create map visualization with better error handling
-        """
+    
         try:
             coordinates = amenities_data.get("coordinates")
             if not coordinates:
@@ -366,18 +365,34 @@ class OpenStreetMapClient:
             
             lat, lon = coordinates
             
-            # Create map
+            # ✅ FIX 1: Always use absolute path
+            if not os.path.isabs(save_path):
+                # Get backend root directory
+                backend_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                save_path = os.path.join(backend_root, save_path)
+            
+            # ✅ FIX 2: Ensure directory exists
+            os.makedirs(os.path.dirname(save_path), exist_ok=True)
+            
+            print(f"📍 Creating map for: {address}")
+            print(f"📍 Coordinates: ({lat:.4f}, {lon:.4f})")
+            print(f"📁 Saving to: {save_path}")
+            
+            # ✅ FIX 3: Create map with better configuration
             m = folium.Map(
                 location=[lat, lon],
                 zoom_start=15,
-                tiles='OpenStreetMap'
+                tiles='OpenStreetMap',
+                control_scale=True,
+                prefer_canvas=True  # Better performance
             )
             
-            # Add target marker
+            # Add target marker with custom icon
             folium.Marker(
                 [lat, lon],
-                popup=f"<b>Target:</b> {address}",
-                icon=folium.Icon(color="red", icon="info-sign")
+                popup=folium.Popup(f"<b>📍 Target Location</b><br>{address}", max_width=300),
+                tooltip="Target Location",
+                icon=folium.Icon(color="red", icon="star", prefix='fa')
             ).add_to(m)
             
             # Amenity colors
@@ -392,7 +407,7 @@ class OpenStreetMapClient:
                 'pharmacy': 'pink',
                 'gym': 'cadetblue',
                 'library': 'lightblue',
-                'transit_station': 'lightgray'
+                'transit_station': 'gray'
             }
             
             # Add amenity markers
@@ -402,7 +417,6 @@ class OpenStreetMapClient:
             for amenity_type, items in amenities.items():
                 color = colors.get(amenity_type, 'gray')
                 
-                # Show all items from the search, no arbitrary limit
                 for item in items:
                     try:
                         item_coords = item.get('coordinates', {})
@@ -410,21 +424,26 @@ class OpenStreetMapClient:
                         item_lon = item_coords.get('longitude')
                         
                         if item_lat and item_lon:
+                            popup_html = f"""
+                            <div style="font-family: Arial; min-width: 150px;">
+                                <h4 style="margin: 0 0 5px 0;">{item.get('name', 'Unknown')}</h4>
+                                <p style="margin: 0;"><b>Type:</b> {amenity_type.title()}</p>
+                                <p style="margin: 0;"><b>Distance:</b> {item.get('distance_km', 0):.2f} km</p>
+                            </div>
+                            """
+                            
                             folium.Marker(
                                 [item_lat, item_lon],
-                                popup=f"""
-                                <b>{item.get('name', 'Unknown')}</b><br>
-                                Type: {item.get('type', 'N/A')}<br>
-                                Distance: {item.get('distance_km', 0):.2f} km
-                                """,
+                                popup=folium.Popup(popup_html, max_width=300),
+                                tooltip=item.get('name', 'Unknown'),
                                 icon=folium.Icon(color=color, icon="info-sign")
                             ).add_to(m)
                             marker_count += 1
                     except Exception as e:
-                        # Skip problematic markers
+                        print(f"⚠️ Skipping marker: {e}")
                         continue
             
-            print(f"✅ Added {marker_count} amenity markers to map")
+            print(f"✅ Added {marker_count} amenity markers")
             
             # Add search radius circle
             search_radius = amenities_data.get("search_radius_m", 1000)
@@ -435,25 +454,38 @@ class OpenStreetMapClient:
                 fill=True,
                 fill_color='crimson',
                 fill_opacity=0.1,
-                popup=f"Search Radius: {search_radius}m"
+                weight=2,
+                popup=f"Search Radius: {search_radius}m",
+                tooltip=f"{search_radius}m radius"
             ).add_to(m)
             
-            # Save map
-            import os
-            os.makedirs(os.path.dirname(save_path) if os.path.dirname(save_path) else '.', exist_ok=True)
-            m.save(save_path)
+            # ✅ FIX 4: Add layer control
+            folium.LayerControl().add_to(m)
             
-            # Verify file was created
+            # ✅ FIX 5: Save map
+            try:
+                m.save(save_path)
+                print(f"💾 Map saved successfully")
+            except Exception as save_error:
+                print(f"❌ Error saving map: {save_error}")
+                return None
+            
+            # ✅ FIX 6: Verify file was created
             if os.path.exists(save_path):
                 file_size = os.path.getsize(save_path)
-                print(f"✅ Map saved to: {save_path} ({file_size} bytes)")
+                if file_size < 1000:  # File too small, likely error
+                    print(f"⚠️ Map file seems too small: {file_size} bytes")
+                    return None
+                print(f"✅ Map verified: {save_path} ({file_size:,} bytes)")
                 return save_path
             else:
-                print(f"❌ Map file was not created at: {save_path}")
+                print(f"❌ Map file not found after save: {save_path}")
                 return None
         
         except Exception as e:
             print(f"❌ Error creating map: {e}")
+            import traceback
+            traceback.print_exc()
             return None
 
 

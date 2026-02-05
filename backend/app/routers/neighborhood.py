@@ -15,6 +15,7 @@ from ..crud import (
 )
 from ..geospatial import OpenStreetMapClient, calculate_walk_score
 
+
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 logger = logging.getLogger(__name__)
@@ -277,29 +278,33 @@ async def get_analysis_map(analysis_id: str):
         if analysis.get("status") != "completed":
             raise HTTPException(
                 status_code=400, 
-                detail=f"Analysis not completed yet. Status: {analysis.get('status')}"
+                detail=f"Analysis not completed. Status: {analysis.get('status')}"
             )
         
         map_path = analysis.get("map_path")
         
         if not map_path:
-            raise HTTPException(status_code=404, detail="Map not generated for this analysis")
+            raise HTTPException(status_code=404, detail="Map not generated")
         
-        # ✅ FIX: Convert relative path to absolute
+        
         if not os.path.isabs(map_path):
-            map_path = os.path.join(PROJECT_ROOT, map_path)
+            backend_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            map_path = os.path.join(backend_root, map_path)
         
-        # ✅ FIX: Now check with absolute path
         if not os.path.exists(map_path):
             raise HTTPException(
                 status_code=404, 
-                detail=f"Map file not found at {map_path}"
+                detail=f"Map file not found: {os.path.basename(map_path)}"
             )
-        
+    
         return FileResponse(
             map_path,
             media_type="text/html",
-            filename=f"neighborhood_{analysis_id}.html"
+            headers={
+                "Content-Type": "text/html; charset=utf-8",
+                "Content-Disposition": "inline", 
+                "Cache-Control": "no-cache"
+            }
         )
         
     except HTTPException:
