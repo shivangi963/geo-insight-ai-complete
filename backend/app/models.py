@@ -127,3 +127,21 @@ class NeighborhoodAnalysisResponse(BaseModel):
     timestamp: Optional[str] = None
     task_id: Optional[str] = None
     message: Optional[str] = None
+
+class SatelliteAnalysisRequest(BaseModel):
+    
+    address: str
+    radius_m: int = Field(default=500, ge=100, le=2000)
+    calculate_green_space: bool = Field(default=True)
+
+
+class SatelliteAnalysisResponse(BaseModel):
+    
+    analysis_id: str
+    task_id: str
+    address: str
+    status: str
+    message: Optional[str] = None
+    created_at: str
+    green_space_percentage: Optional[float] = None
+    breakdown: Optional[Dict[str, float]] = None  

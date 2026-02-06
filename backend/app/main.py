@@ -207,7 +207,8 @@ from .routers import (
     image_analysis,
     vector_search,
     tasks,
-    debug_stats
+    debug_stats,
+    osm_green_space
 )
 
 # Include routers
@@ -218,6 +219,7 @@ app.include_router(image_analysis.router)
 app.include_router(vector_search.router)
 app.include_router(tasks.router)
 app.include_router(debug_stats.router)
+app.include_router(osm_green_space.router)
 
 # Include workflow router if available
 if WORKFLOW_ENABLED:

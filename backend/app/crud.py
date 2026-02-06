@@ -331,5 +331,58 @@ async def cleanup_stuck_analyses(max_age_minutes: int = 30):
         print(f"❌ Error cleaning up stuck analyses: {e}")
         return 0
 
-# Create instance
+SATELLITE_ANALYSIS_COLLECTION = "satellite_analyses"
+
+async def create_satellite_analysis(analysis_data: Dict) -> str:
+    """Create new satellite analysis document"""
+    db = await get_database()
+    analysis_data["created_at"] = datetime.now()
+    analysis_data["updated_at"] = datetime.now()
+    result = await db[SATELLITE_ANALYSIS_COLLECTION].insert_one(analysis_data)
+    return str(result.inserted_id)
+
+async def get_satellite_analysis(analysis_id: str) -> Optional[Dict]:
+    """Get satellite analysis by ID"""
+    db = await get_database()
+    try:
+        obj_id = ObjectId(analysis_id)
+        analysis = await db[SATELLITE_ANALYSIS_COLLECTION].find_one({"_id": obj_id})
+    except:
+        analysis = await db[SATELLITE_ANALYSIS_COLLECTION].find_one({"_id": analysis_id})
+    
+    if analysis and "_id" in analysis:
+        analysis["id"] = str(analysis["_id"])
+        del analysis["_id"]
+    return analysis
+
+async def update_analysis_status(analysis_id: str, status: str, update_data: Dict) -> bool:
+    """Update analysis status and data"""
+    db = await get_database()
+    try:
+        obj_id = ObjectId(analysis_id)
+        filter_query = {"_id": obj_id}
+    except:
+        filter_query = {"_id": analysis_id}
+    
+    update_data["status"] = status
+    update_data["updated_at"] = datetime.now()
+    
+    result = await db[SATELLITE_ANALYSIS_COLLECTION].update_one(
+        filter_query,
+        {"$set": update_data}
+    )
+    return result.modified_count > 0
+
+async def get_recent_satellite_analyses(limit: int = 10) -> list:
+    """Get recent analyses"""
+    db = await get_database()
+    cursor = db[SATELLITE_ANALYSIS_COLLECTION].find().sort("created_at", -1).limit(limit)
+    analyses = []
+    async for doc in cursor:
+        if "_id" in doc:
+            doc["id"] = str(doc["_id"])
+            del doc["_id"]
+        analyses.append(doc)
+    return analyses
+
 property_crud = PropertyCRUD()
