@@ -7,7 +7,6 @@ load_dotenv()
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 
-# configure Celery app
 celery_app = Celery(
     "geo_insight_tasks",
     broker=REDIS_URL,
@@ -17,10 +16,10 @@ celery_app = Celery(
         "app.tasks.geospatial_tasks",
         "app.tasks.agent_tasks",
         "app.tasks.maintenance_tasks",
+        "app.tasks.satellite_tasks",  
     ]
 )
 
-# Production-friendly default configuration (overridable via env)
 celery_app.conf.update(
     task_serializer="json",
     accept_content=["json"],
@@ -57,6 +56,7 @@ celery_app.conf.update(
         # route heavy image processing to cpu_bound
         "app.tasks.computer_vision_tasks.analyze_street_image": {"queue": "cpu_bound", "routing_key": "task.cpu"},
         "app.tasks.computer_vision_tasks.calculate_green_space": {"queue": "cpu_bound", "routing_key": "task.cpu"},
+        "app.tasks.satellite_tasks.analyze_satellite": {"queue": "cpu_bound", "routing_key": "task.cpu"},  # Added
         # route geospatial analyses to io_bound
         "app.tasks.geospatial_tasks.analyze_neighborhood": {"queue": "io_bound", "routing_key": "task.io"},
         # agent tasks are lightweight - default
@@ -74,6 +74,7 @@ celery_app.conf.update(
     task_annotations={
         "*": {"rate_limit": None},
         "app.tasks.computer_vision_tasks.analyze_street_image": {"rate_limit": None, "acks_late": True},
+        "app.tasks.satellite_tasks.analyze_satellite": {"rate_limit": None, "acks_late": True},  # Added
     },
 
     beat_schedule={
