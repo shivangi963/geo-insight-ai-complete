@@ -34,7 +34,6 @@ def render_image_analysis_page():
     with tab2:
         render_street_scene_tab()
 
-
 # ==================== GREEN SPACE ANALYSIS ====================
 
 def render_green_space_tab():
@@ -68,7 +67,7 @@ def render_green_space_tab():
         radius = st.slider(
             "Search Radius (meters)",
             min_value=100,
-            max_value=2000,
+            max_value=4000,
             value=500,
             step=100,
             help="Area radius to analyze around the address",
@@ -102,13 +101,17 @@ def run_green_space_analysis(address: str, radius: int) -> Optional[Dict]:
         st.subheader("🔄 Running Analysis")
         
         with st.spinner("🌍 Starting green space analysis..."):
-            # Submit analysis request
+            
             response = requests.post(
                 f"{api.base_url}/api/analysis/green-space",
                 params={
                     "address": address,
                     "radius_m": radius
                 },
+                headers={
+                    "Content-Type": "application/json"  
+                },
+                json={},  
                 timeout=10
             )
         

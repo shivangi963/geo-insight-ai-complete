@@ -19,18 +19,9 @@ router = APIRouter(prefix="/api/analysis", tags=["image-analysis"])
 @router.post("/green-space", status_code=202)
 async def analyze_green_space(
     address: str = Query(..., description="Address to analyze"),
-    radius_m: int = Query(500, ge=100, le=2000, description="Search radius in meters"),
+    radius_m: int = Query(500, ge=100, le=4000, description="Search radius in meters"),
     background_tasks: BackgroundTasks = None
 ):
-    """
-    Analyze green space coverage using OpenStreetMap data
-    
-    This endpoint uses OSM map tiles to detect and calculate green coverage
-    including parks, forests, recreation areas, and natural spaces.
-    
-    Returns:
-        Analysis ID and task ID for polling
-    """
     try:
         from ..crud import create_satellite_analysis
         
