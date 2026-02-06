@@ -72,4 +72,3 @@ slowapi>=0.1.9
 
 
 streamlit-option-menu==0.3.6
-

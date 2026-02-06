@@ -6,7 +6,7 @@ from . import (
     vector_search,
     tasks,
     debug_stats,
-    osm_green_space
+    green_space
 )
 
 __all__ = [
@@ -17,7 +17,7 @@ __all__ = [
     "vector_search",
     "tasks",
     "debug_stats",
-    "osm_green_space"
+    "green_space"
 ]
 
 __version__ = "1.0.0"

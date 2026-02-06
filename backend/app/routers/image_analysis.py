@@ -158,7 +158,7 @@ async def process_green_space_analysis(
             sys.path.insert(0, backend_dir)
         
         # Import from osm_green_space router
-        from app.routers.osm_green_space import get_osm_map_area
+        from app.routers.green_space import get_osm_map_area
         
         # Fetch OSM map
         map_image = await asyncio.to_thread(

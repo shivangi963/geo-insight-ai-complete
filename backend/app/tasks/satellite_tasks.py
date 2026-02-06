@@ -65,7 +65,7 @@ def analyze_satellite_task(self, analysis_id: str, request_data: dict) -> dict:
         })
         
         # Fetch OSM map
-        from app.routers.osm_green_space import get_osm_map_area
+        from app.routers.green_space import get_osm_map_area
         map_image = get_osm_map_area(lat, lon, radius_m)
         
         if not map_image:
