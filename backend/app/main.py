@@ -4,7 +4,6 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 from fastapi.staticfiles import StaticFiles
-from typing import Dict, Any
 import logging
 import os
 import asyncio
@@ -208,7 +207,7 @@ from .routers import (
     vector_search,
     tasks,
     debug_stats,
-    osm_green_space
+    green_space
 )
 
 # Include routers
@@ -219,7 +218,7 @@ app.include_router(image_analysis.router)
 app.include_router(vector_search.router)
 app.include_router(tasks.router)
 app.include_router(debug_stats.router)
-app.include_router(osm_green_space.router)
+app.include_router(green_space.router)
 
 # Include workflow router if available
 if WORKFLOW_ENABLED:

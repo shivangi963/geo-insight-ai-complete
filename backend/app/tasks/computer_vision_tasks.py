@@ -252,69 +252,6 @@ def create_osm_green_visualization(
 
 
 
-def calculate_green_space_from_image(image_path: str, analysis_id: str) -> Optional[Dict]:
-    
-    try:
-        # Read image
-        image = cv2.imread(image_path)
-        if image is None:
-            logger.error(f"Failed to read image: {image_path}")
-            return None
-        
-        # Convert to RGB
-        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        
-        # Convert to HSV for better green detection
-        hsv = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2HSV)
-        
-        # Define green color ranges in HSV
-        # Range 1: Main green (grass, trees)
-        lower_green1 = np.array([35, 40, 40])
-        upper_green1 = np.array([85, 255, 255])
-        
-        # Range 2: Yellowish green (lighter vegetation)
-        lower_green2 = np.array([25, 40, 40])
-        upper_green2 = np.array([35, 255, 255])
-        
-        # Create masks
-        mask1 = cv2.inRange(hsv, lower_green1, upper_green1)
-        mask2 = cv2.inRange(hsv, lower_green2, upper_green2)
-        
-        # Combine masks
-        green_mask = cv2.bitwise_or(mask1, mask2)
-        
-        # Apply morphological operations to clean up mask
-        kernel = np.ones((5, 5), np.uint8)
-        green_mask = cv2.morphologyEx(green_mask, cv2.MORPH_CLOSE, kernel)
-        green_mask = cv2.morphologyEx(green_mask, cv2.MORPH_OPEN, kernel)
-        
-        # Calculate metrics
-        total_pixels = image.shape[0] * image.shape[1]
-        green_pixels = np.sum(green_mask > 0)
-        green_percentage = (green_pixels / total_pixels) * 100
-        
-        logger.info(f"Green space calculation:")
-        logger.info(f"  Total pixels: {total_pixels:,}")
-        logger.info(f"  Green pixels: {green_pixels:,}")
-        logger.info(f"  Green percentage: {green_percentage:.2f}%")
-        
-        # Create visualization
-        visualization_path = create_green_space_visualization(
-            image_rgb, green_mask, green_percentage, analysis_id
-        )
-        
-        return {
-            'green_space_percentage': round(green_percentage, 2),
-            'green_pixels': int(green_pixels),
-            'total_pixels': int(total_pixels),
-            'visualization_path': visualization_path
-        }
-        
-    except Exception as e:
-        logger.error(f"Error calculating green space: {e}", exc_info=True)
-        return None
-
-
 def create_green_space_visualization(
     image: np.ndarray,
     green_mask: np.ndarray,

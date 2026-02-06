@@ -72,17 +72,6 @@ def create_scatter_plot(df: pd.DataFrame, x_col: str, y_col: str,
     
     return fig
 
-def create_line_chart(df: pd.DataFrame, x_col: str, y_col: str,
-                     title: str = "Trend") -> go.Figure:
-    """Create line chart"""
-    fig = px.line(
-        df,
-        x=x_col,
-        y=y_col,
-        title=title
-    )
-    
-    return fig
 
 def create_gauge_chart(value: float, title: str = "Metric",
                       min_val: float = 0, max_val: float = 100,
@@ -108,39 +97,6 @@ def create_gauge_chart(value: float, title: str = "Metric",
     
     return fig
 
-def create_heatmap(df: pd.DataFrame, title: str = "Correlation Heatmap") -> go.Figure:
-    """Create correlation heatmap"""
-    # Get numeric columns only
-    numeric_df = df.select_dtypes(include=['float64', 'int64'])
-    
-    if numeric_df.empty:
-        return None
-    
-    corr = numeric_df.corr()
-    
-    fig = go.Figure(data=go.Heatmap(
-        z=corr.values,
-        x=corr.columns,
-        y=corr.columns,
-        colorscale='RdBu',
-        zmid=0
-    ))
-    
-    fig.update_layout(title=title)
-    
-    return fig
-
-def create_box_plot(df: pd.DataFrame, y_col: str, x_col: Optional[str] = None,
-                   title: str = "Distribution") -> go.Figure:
-    """Create box plot"""
-    fig = px.box(
-        df,
-        y=y_col,
-        x=x_col,
-        title=title
-    )
-    
-    return fig
 
 def render_metric_cards(metrics: Dict[str, Dict[str, any]]):
     """Render multiple metric cards in columns"""
@@ -154,16 +110,3 @@ def render_metric_cards(metrics: Dict[str, Dict[str, any]]):
             
             st.metric(label, value, delta=delta, help=help_text)
 
-def render_kpi_row(kpis: List[Dict[str, any]]):
-    """Render KPI row with custom styling"""
-    cols = st.columns(len(kpis))
-    
-    for col, kpi in zip(cols, kpis):
-        with col:
-            st.markdown(f"""
-            <div class="metric-card">
-                <h3>{kpi.get('label', '')}</h3>
-                <h1>{kpi.get('value', 'N/A')}</h1>
-                <p>{kpi.get('description', '')}</p>
-            </div>
-            """, unsafe_allow_html=True)

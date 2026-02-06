@@ -5,8 +5,6 @@ Extracted from main.py for better organization
 from fastapi import APIRouter, HTTPException, Query, Request, Depends
 from typing import List, Optional
 import logging
-from datetime import datetime
-
 from ..crud import property_crud
 from ..models import PropertyCreate, PropertyUpdate, PropertyResponse
 from ..database import Database

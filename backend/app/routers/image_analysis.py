@@ -415,25 +415,3 @@ async def perform_street_detection(image_np, filename: str) -> Dict:
         logger.error(f"Street detection failed: {e}")
         raise
 
-
-# ==================== LEGACY COMPATIBILITY ====================
-
-@router.post("/image", status_code=202)
-async def analyze_image_legacy(
-    file: UploadFile = File(...),
-    analysis_type: str = Query("object_detection", regex="^(object_detection|segmentation)$")
-):
-    """
-    Legacy endpoint - redirects to appropriate analysis
-    
-    Maintained for backward compatibility
-    """
-    if analysis_type == "segmentation":
-        # Redirect to green space analysis
-        raise HTTPException(
-            status_code=400,
-            detail="For green space analysis, use POST /api/analysis/green-space with address parameter"
-        )
-    else:
-        # Redirect to street scene detection
-        return await analyze_street_scene(file)

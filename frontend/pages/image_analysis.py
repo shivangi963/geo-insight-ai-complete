@@ -1,7 +1,4 @@
-"""
-Image Analysis Page - Integrated Green Space & Street Scene Analysis
-Simplified and integrated with existing backend structure
-"""
+
 import streamlit as st
 import requests
 from PIL import Image
