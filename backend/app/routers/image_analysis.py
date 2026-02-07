@@ -152,22 +152,19 @@ async def process_green_space_analysis(
         from app.routers.green_space import get_osm_map_area
         
         # Fetch OSM map
-        map_image = await asyncio.to_thread(
+        map_path = await asyncio.to_thread(
             get_osm_map_area,
             lat, lon, radius_m
         )
         
-        if not map_image:
+        if not map_path or not os.path.exists(map_path):
             await update_analysis_status(analysis_id, "failed", {
                 "error": "Failed to fetch OpenStreetMap tiles",
                 "progress": 100
             })
             return
-        
-        # Save temporary image
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.png') as temp_file:
-            map_image.save(temp_file, format='PNG')
-            temp_path = temp_file.name
+
+        temp_path = map_path
         
         try:
             await update_analysis_status(analysis_id, "processing", {

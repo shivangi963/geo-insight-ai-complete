@@ -14,6 +14,11 @@ import time
 from functools import wraps
 import math
 import os
+from PIL import Image
+import requests
+from io import BytesIO
+from fastapi import APIRouter
+import logging
 
 # ✅ FIXED: Configure OSM with timeouts
 ox.settings.log_console = True
@@ -552,3 +557,84 @@ def calculate_walk_score(coordinates: Tuple[float, float], amenities_data: Dict)
     except Exception as e:
         print(f"❌ Error calculating walk score: {e}")
         return 0.0
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/api/osm", tags=["osm-green-space"])
+
+def get_osm_map_area(latitude: float, longitude: float, radius_meters: int = 500) -> Optional[Image.Image]:
+    import time
+    
+    logger.info(f"Fetching OSM map for ({latitude:.4f}, {longitude:.4f}), radius={radius_meters}m")
+
+    if radius_meters <= 500:
+        zoom = 17
+    elif radius_meters <= 1000:
+        zoom = 16
+    else:
+        zoom = 15
+    
+    logger.info(f"Using zoom level {zoom}")
+    
+    center_x, center_y = lat_lon_to_tile(latitude, longitude, zoom)
+    logger.info(f"Center tile: ({center_x}, {center_y})")
+    
+    if radius_meters <= 600:
+        logger.info("Small radius - downloading 1 tile only")
+        
+        start_time = time.time()
+        tile = download_osm_tile(center_x, center_y, zoom)
+        elapsed = time.time() - start_time
+        
+        if not tile:
+            logger.error(f"Failed to download center tile after {elapsed:.1f}s")
+            return None
+        
+        logger.info(f"✅ Downloaded 1 tile in {elapsed:.1f}s")
+        
+        return tile
+
+    
+    # For larger areas, download 2x2 grid (4 tiles max)
+    else:
+        logger.info("Large radius - downloading 2x2 grid (4 tiles)")
+        
+        tiles = {}
+        start_time = time.time()
+        
+        for dx in [0, 1]:
+            for dy in [0, 1]:
+                tx = center_x + dx
+                ty = center_y + dy
+                
+                tile = download_osm_tile(tx, ty, zoom)
+                if tile:
+                    tiles[(tx, ty)] = tile
+        
+        elapsed = time.time() - start_time
+        
+        if not tiles:
+            logger.error(f"Failed to download any tiles after {elapsed:.1f}s")
+            return None
+        
+        logger.info(f"✅ Downloaded {len(tiles)}/4 tiles in {elapsed:.1f}s")
+        
+        if len(tiles) == 1:
+            logger.warning("Only got 1 tile, using it")
+            tile = list(tiles.values())[0]
+            
+            return tile
+
+        
+        # Stitch tiles together
+        logger.info("Stitching tiles...")
+        
+        tile_size = 256
+        stitched = Image.new('RGB', (tile_size * 2, tile_size * 2), color=(240, 240, 240))
+        
+        for (tx, ty), tile in tiles.items():
+            x_offset = (tx - center_x) * tile_size
+            y_offset = (ty - center_y) * tile_size
+            stitched.paste(tile, (x_offset, y_offset))
+        
+        return stitched
