@@ -1,7 +1,3 @@
-"""
-OpenStreetMap Green Space Router
-Provides endpoints and utilities for fetching OSM map tiles
-"""
 from fastapi import APIRouter, HTTPException, Query
 from typing import Optional, Tuple
 import requests
@@ -15,81 +11,89 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/osm", tags=["osm-green-space"])
 
 
-def get_osm_map_area(
-    latitude: float,
-    longitude: float,
-    radius_meters: int = 500,
-    zoom: int = 17
-) -> Optional[Image.Image]:
-    """
-    Fetch OpenStreetMap tiles for a given area and return as PIL Image
+def get_osm_map_area(latitude: float, longitude: float, radius_meters: int = 500) -> Optional[Image.Image]:
+    import time
     
-    Args:
-        latitude: Center latitude
-        longitude: Center longitude
-        radius_meters: Radius around center point in meters
-        zoom: OSM zoom level (higher = more detail, max 19)
+    logger.info(f"Fetching OSM map for ({latitude:.4f}, {longitude:.4f}), radius={radius_meters}m")
     
-    Returns:
-        PIL Image of the map area, or None if failed
-    """
-    try:
-        # Calculate tile coordinates for center point
-        center_tile_x, center_tile_y = lat_lon_to_tile(latitude, longitude, zoom)
+    # Choose zoom based on radius
+    if radius_meters <= 500:
+        zoom = 17
+    elif radius_meters <= 1000:
+        zoom = 16
+    else:
+        zoom = 15
+    
+    logger.info(f"Using zoom level {zoom}")
+    
+    # Get center tile
+    center_x, center_y = lat_lon_to_tile(latitude, longitude, zoom)
+    logger.info(f"Center tile: ({center_x}, {center_y})")
+    
+    # For small areas, just download center tile (FAST!)
+    if radius_meters <= 600:
+        logger.info("Small radius - downloading 1 tile only")
         
-        # Calculate how many tiles we need based on radius
-        # At zoom 17, each tile is ~150m wide at equator
-        # So for 500m radius, we need ~7 tiles (3.33 tiles each direction)
-        meters_per_tile = 156543.03 * math.cos(math.radians(latitude)) / (2 ** zoom)
-        tiles_needed = math.ceil(radius_meters / meters_per_tile)
+        start_time = time.time()
+        tile = download_osm_tile(center_x, center_y, zoom)
+        elapsed = time.time() - start_time
         
-        # Ensure we get at least a 3x3 grid
-        tiles_needed = max(tiles_needed, 1)
-        
-        # Calculate tile range
-        min_tile_x = center_tile_x - tiles_needed
-        max_tile_x = center_tile_x + tiles_needed
-        min_tile_y = center_tile_y - tiles_needed
-        max_tile_y = center_tile_y + tiles_needed
-        
-        logger.info(f"Fetching OSM tiles: center=({center_tile_x}, {center_tile_y}), "
-                   f"range: x={min_tile_x}-{max_tile_x}, y={min_tile_y}-{max_tile_y}, zoom={zoom}")
-        
-        # Download tiles
-        tiles = {}
-        for tile_x in range(min_tile_x, max_tile_x + 1):
-            for tile_y in range(min_tile_y, max_tile_y + 1):
-                tile_img = download_osm_tile(tile_x, tile_y, zoom)
-                if tile_img:
-                    tiles[(tile_x, tile_y)] = tile_img
-        
-        if not tiles:
-            logger.error("Failed to download any OSM tiles")
+        if not tile:
+            logger.error(f"Failed to download center tile after {elapsed:.1f}s")
             return None
         
+        logger.info(f"✅ Downloaded 1 tile in {elapsed:.1f}s")
+        
+        return tile
+
+    
+    # For larger areas, download 2x2 grid (4 tiles max)
+    else:
+        logger.info("Large radius - downloading 2x2 grid (4 tiles)")
+        
+        tiles = {}
+        start_time = time.time()
+        
+        for dx in [0, 1]:
+            for dy in [0, 1]:
+                tx = center_x + dx
+                ty = center_y + dy
+                
+                tile = download_osm_tile(tx, ty, zoom)
+                if tile:
+                    tiles[(tx, ty)] = tile
+        
+        elapsed = time.time() - start_time
+        
+        if not tiles:
+            logger.error(f"Failed to download any tiles after {elapsed:.1f}s")
+            return None
+        
+        logger.info(f"✅ Downloaded {len(tiles)}/4 tiles in {elapsed:.1f}s")
+        
+        if len(tiles) == 1:
+            logger.warning("Only got 1 tile, using it")
+            tile = list(tiles.values())[0]
+            
+            return tile
+
+        
         # Stitch tiles together
-        stitched_image = stitch_tiles(tiles, min_tile_x, min_tile_y, max_tile_x, max_tile_y)
+        logger.info("Stitching tiles...")
         
-        logger.info(f"Created stitched map image: {stitched_image.size}")
-        return stitched_image
+        tile_size = 256
+        stitched = Image.new('RGB', (tile_size * 2, tile_size * 2), color=(240, 240, 240))
         
-    except Exception as e:
-        logger.error(f"Error fetching OSM map area: {e}", exc_info=True)
-        return None
+        for (tx, ty), tile in tiles.items():
+            x_offset = (tx - center_x) * tile_size
+            y_offset = (ty - center_y) * tile_size
+            stitched.paste(tile, (x_offset, y_offset))
+        
+        return stitched
 
 
 def lat_lon_to_tile(latitude: float, longitude: float, zoom: int) -> Tuple[int, int]:
-    """
-    Convert latitude/longitude to OSM tile coordinates
     
-    Args:
-        latitude: Latitude in degrees
-        longitude: Longitude in degrees
-        zoom: Zoom level
-    
-    Returns:
-        Tuple of (tile_x, tile_y)
-    """
     lat_rad = math.radians(latitude)
     n = 2.0 ** zoom
     
@@ -99,70 +103,38 @@ def lat_lon_to_tile(latitude: float, longitude: float, zoom: int) -> Tuple[int, 
     return tile_x, tile_y
 
 
-def download_osm_tile(tile_x: int, tile_y: int, zoom: int, 
-                      tile_server: str = "https://tile.openstreetmap.org") -> Optional[Image.Image]:
-    """
-    Download a single OSM tile
-    
-    Args:
-        tile_x: Tile X coordinate
-        tile_y: Tile Y coordinate
-        zoom: Zoom level
-        tile_server: OSM tile server URL
-    
-    Returns:
-        PIL Image of the tile, or None if failed
-    """
+def download_osm_tile(tile_x: int, tile_y: int, zoom: int) -> Optional[Image.Image]:
+
     try:
-        # OSM tile URL format: https://tile.openstreetmap.org/{z}/{x}/{y}.png
-        url = f"{tile_server}/{zoom}/{tile_x}/{tile_y}.png"
+        url = f"https://tile.openstreetmap.org/{zoom}/{tile_x}/{tile_y}.png"
+        headers = {'User-Agent': 'GeoInsightAI/1.0 (Educational Project)'}
         
-        # Add user agent (required by OSM)
-        headers = {
-            'User-Agent': 'GeoInsightAI/1.0 (Educational Project)'
-        }
-        
-        response = requests.get(url, headers=headers, timeout=10)
+        # CRITICAL: 5 second timeout per tile
+        response = requests.get(url, headers=headers, timeout=5)
         
         if response.status_code == 200:
             tile_image = Image.open(io.BytesIO(response.content))
             return tile_image
         else:
-            logger.warning(f"Failed to download tile ({tile_x}, {tile_y}, {zoom}): HTTP {response.status_code}")
+            logger.warning(f"OSM tile ({tile_x},{tile_y}) returned {response.status_code}")
             return None
-            
+    except requests.exceptions.Timeout:
+        logger.warning(f"OSM tile ({tile_x},{tile_y}) timeout after 5s")
+        return None
     except Exception as e:
-        logger.warning(f"Error downloading tile ({tile_x}, {tile_y}, {zoom}): {e}")
+        logger.warning(f"OSM tile ({tile_x},{tile_y}) error: {e}")
         return None
 
-
 def stitch_tiles(tiles: dict, min_x: int, min_y: int, max_x: int, max_y: int) -> Image.Image:
-    """
-    Stitch downloaded tiles into a single image
     
-    Args:
-        tiles: Dictionary mapping (x, y) -> PIL Image
-        min_x: Minimum tile X
-        min_y: Minimum tile Y
-        max_x: Maximum tile X
-        max_y: Maximum tile Y
-    
-    Returns:
-        Stitched PIL Image
-    """
-    # OSM tiles are 256x256 pixels
     tile_size = 256
     
-    # Calculate output image size
     width = (max_x - min_x + 1) * tile_size
     height = (max_y - min_y + 1) * tile_size
     
-    # Create blank canvas
     stitched = Image.new('RGB', (width, height), color=(240, 240, 240))
     
-    # Paste each tile
     for (tile_x, tile_y), tile_img in tiles.items():
-        # Calculate position in stitched image
         x_offset = (tile_x - min_x) * tile_size
         y_offset = (tile_y - min_y) * tile_size
         
@@ -171,7 +143,6 @@ def stitch_tiles(tiles: dict, min_x: int, min_y: int, max_x: int, max_y: int) ->
     return stitched
 
 
-# ==================== API ENDPOINTS ====================
 
 @router.get("/tile/{zoom}/{tile_x}/{tile_y}")
 async def get_tile(
@@ -179,11 +150,7 @@ async def get_tile(
     tile_x: int,
     tile_y: int
 ):
-    """
-    Proxy endpoint to fetch a single OSM tile
     
-    Useful for debugging or direct tile access
-    """
     try:
         tile_img = download_osm_tile(tile_x, tile_y, zoom)
         
@@ -212,13 +179,9 @@ async def get_map_image(
     radius_m: int = Query(500, ge=100, le=5000, description="Radius in meters"),
     zoom: int = Query(17, ge=1, le=19, description="Zoom level")
 ):
-    """
-    Fetch a map image for a given location
     
-    Returns a stitched OSM map as PNG
-    """
     try:
-        map_image = get_osm_map_area(latitude, longitude, radius_m, zoom)
+        map_image = get_osm_map_area(latitude, longitude, radius_m)
         
         if not map_image:
             raise HTTPException(status_code=500, detail="Failed to generate map")
