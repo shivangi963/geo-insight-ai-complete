@@ -71,7 +71,7 @@ async def analyze_green_space(
                 use_celery = False
         
         if not use_celery:
-            # Use FastAPI background tasks
+            
             task_id = f"green_space_{analysis_id}"
             background_tasks.add_task(
                 process_green_space_analysis,

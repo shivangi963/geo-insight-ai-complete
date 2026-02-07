@@ -1,6 +1,6 @@
 """
-Computer Vision Module for Green Space Analysis
-Analyzes satellite imagery and OSM maps to calculate green space percentage
+Computer Vision Module for Green Space Analysis - FIXED VERSION
+Uses CORRECT OpenStreetMap color values
 """
 import cv2
 import numpy as np
@@ -13,7 +13,9 @@ logger = logging.getLogger(__name__)
 
 
 def analyze_osm_green_spaces(image_path: str, analysis_id: str) -> Optional[Dict]:
-    
+    """
+    Analyze OSM map image for green spaces - FIXED COLOR DETECTION
+    """
     try:
         # Read image
         image = cv2.imread(image_path)
@@ -25,9 +27,10 @@ def analyze_osm_green_spaces(image_path: str, analysis_id: str) -> Optional[Dict
         image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         
         logger.info(f"🖼️ Analyzing OSM image: {image.shape}")
+        logger.info(f"   Image stats - Min: {image_rgb.min()}, Max: {image_rgb.max()}, Mean: {image_rgb.mean():.1f}")
         
-        # Detect different green areas
-        green_masks = detect_osm_green_areas(image_rgb)
+        # Detect different green areas with CORRECT OSM colors
+        green_masks = detect_osm_green_areas_fixed(image_rgb)
         
         # Combine all green masks
         combined_mask = combine_green_masks(green_masks)
@@ -48,7 +51,7 @@ def analyze_osm_green_spaces(image_path: str, analysis_id: str) -> Optional[Dict
             type_pixels = np.sum(mask > 0)
             type_pct = (type_pixels / total_pixels) * 100
             breakdown[green_type] = round(type_pct, 2)
-            logger.info(f"   {green_type}: {type_pct:.2f}%")
+            logger.info(f"   {green_type}: {type_pct:.2f}% ({type_pixels:,} pixels)")
         
         # Create visualization
         visualization_path = create_osm_green_visualization(
@@ -68,54 +71,88 @@ def analyze_osm_green_spaces(image_path: str, analysis_id: str) -> Optional[Dict
         return None
 
 
-def detect_osm_green_areas(image: np.ndarray) -> Dict[str, np.ndarray]:
-   
+def hex_to_rgb(hex_color: str) -> Tuple[int, int, int]:
+    """Convert hex color to RGB tuple"""
+    hex_color = hex_color.lstrip('#')
+    return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+
+
+def detect_osm_green_areas_fixed(image: np.ndarray) -> Dict[str, np.ndarray]:
+    """
+    FIXED: Detect OSM green areas using CORRECT OpenStreetMap colors
+    
+    OSM Land Use Colors:
+    - Parks/leisure: #c8facc (200, 250, 204)
+    - Forests: #add19e (173, 209, 158), #8dc56c (141, 197, 108)
+    - Grass/meadow: #cfeca8 (207, 236, 168)
+    - Recreation: #add19e (173, 209, 158)
+    - Natural: #ddf1d6 (221, 241, 214)
+    """
     green_masks = {}
     
     # Convert to HSV for better color detection
     hsv = cv2.cvtColor(image, cv2.COLOR_RGB2HSV)
     rgb = image.copy()
     
-    # Define color ranges for different OSM green areas
+    logger.info("🎨 Detecting green areas with OSM color standards...")
+    
+    # FIXED: Correct OSM color ranges
     green_ranges = {
         'parks_grass': {
-            # Light green used for parks (#c8facc, #aed1a0, #b5e3b5)
+            # OSM parks (#c8facc), grass (#cfeca8), leisure areas
             'rgb_ranges': [
-                ((160, 200, 160), (220, 255, 220)),  # Light green
-                ((170, 209, 160), (180, 225, 180)),  # Parks
+                # Light green parks - EXPANDED RANGE
+                ((180, 230, 180), (230, 255, 230)),  # Very light greens
+                ((190, 240, 190), (210, 255, 210)),  # Parks
+                ((195, 225, 155), (215, 245, 175)),  # Grass/meadow
             ],
             'hsv_ranges': [
-                ((35, 20, 180), (85, 100, 255)),  # Light green in HSV
+                # Green hue (35-85), medium-high saturation, high value
+                ((30, 15, 150), (90, 100, 255)),  # EXPANDED - light greens
+                ((35, 20, 180), (75, 80, 255)),   # Medium light greens
             ]
         },
         'forests_woods': {
-            # Dark green used for forests (#8dc56c, #6fc18e)
+            # OSM forests (#add19e, #8dc56c) - darker greens
             'rgb_ranges': [
-                ((100, 180, 100), (150, 210, 150)),  # Forest green
-                ((111, 193, 142), (141, 213, 172)),  # Woods
+                # Forest greens - EXPANDED RANGE
+                ((120, 180, 100), (180, 220, 180)),  # Medium forest green
+                ((130, 190, 150), (180, 215, 170)),  # Woods
+                ((100, 170, 90), (160, 210, 140)),   # Dense forest
             ],
             'hsv_ranges': [
-                ((35, 40, 140), (85, 180, 220)),  # Forest green in HSV
+                ((30, 25, 120), (90, 150, 230)),  # EXPANDED - forest greens
+                ((35, 30, 100), (80, 130, 220)),  # Dark forest
             ]
         },
         'recreation': {
-            # Medium green for recreation areas (#add19e)
+            # OSM recreation/sport (#add19e, similar to forests)
             'rgb_ranges': [
-                ((160, 200, 150), (180, 220, 170)),  # Recreation grounds
+                ((165, 200, 150), (185, 220, 170)),  # Recreation grounds
+                ((150, 190, 140), (180, 215, 165)),  # Sports fields
             ],
             'hsv_ranges': [
-                ((35, 30, 160), (80, 120, 230)),  # Medium green
+                ((32, 20, 150), (75, 90, 230)),  # EXPANDED
             ]
         },
         'natural_areas': {
-            # Olive/natural reserve greens
+            # OSM natural features (#ddf1d6) - very light green
             'rgb_ranges': [
-                ((120, 140, 80), (160, 180, 120)),  # Olive green
+                ((210, 235, 200), (230, 250, 225)),  # Natural/wetlands
+                ((200, 230, 190), (225, 245, 220)),  # Scrubland
             ],
             'hsv_ranges': [
-                ((25, 40, 120), (45, 140, 190)),  # Olive in HSV
+                ((30, 10, 180), (85, 60, 255)),  # EXPANDED - very light greens
             ]
         }
+    }
+    
+    # Additional: Detect ANY green-ish color as fallback
+    green_ranges['any_green'] = {
+        'hsv_ranges': [
+            # Very broad green detection
+            ((25, 10, 100), (95, 200, 255)),  # Almost any green
+        ]
     }
     
     # Detect each type
@@ -136,12 +173,22 @@ def detect_osm_green_areas(image: np.ndarray) -> Dict[str, np.ndarray]:
             mask = cv2.inRange(hsv, lower_hsv, upper_hsv)
             type_mask = cv2.bitwise_or(type_mask, mask)
         
-        # Clean up mask
-        kernel = np.ones((3, 3), np.uint8)
+        # Clean up mask with morphological operations
+        kernel = np.ones((5, 5), np.uint8)
         type_mask = cv2.morphologyEx(type_mask, cv2.MORPH_CLOSE, kernel)
         type_mask = cv2.morphologyEx(type_mask, cv2.MORPH_OPEN, kernel)
         
+        # Store mask
+        pixels_found = np.sum(type_mask > 0)
+        logger.info(f"   {green_type}: {pixels_found:,} pixels detected")
         green_masks[green_type] = type_mask
+    
+    # Remove 'any_green' from final results (it's just for debugging)
+    if 'any_green' in green_masks:
+        any_green_pixels = np.sum(green_masks['any_green'] > 0)
+        logger.info(f"   [Debug] Total green-ish pixels: {any_green_pixels:,}")
+        # Don't include in final breakdown
+        del green_masks['any_green']
     
     return green_masks
 
@@ -166,7 +213,7 @@ def create_osm_green_visualization(
     green_percentage: float,
     analysis_id: str
 ) -> str:
-   
+    """Create visualization with detected green areas highlighted"""
     try:
         # Create output directory
         output_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'results')
@@ -181,7 +228,7 @@ def create_osm_green_visualization(
             'parks_grass': [144, 238, 144],      # Light green
             'forests_woods': [34, 139, 34],      # Forest green
             'recreation': [60, 179, 113],        # Medium sea green
-            'natural_areas': [107, 142, 35]      # Olive drab
+            'natural_areas': [152, 251, 152]     # Pale green
         }
         
         # Apply colored overlays
@@ -238,7 +285,7 @@ def create_osm_green_visualization(
         blended_bgr = cv2.cvtColor(blended, cv2.COLOR_RGB2BGR)
         cv2.imwrite(output_path, blended_bgr)
         
-        logger.info(f"💾 Visualization saved: {output_path}")
+        logger.info(f" Visualization saved: {output_path}")
         
         # Return relative path
         return f"results/{output_filename}"
@@ -247,67 +294,4 @@ def create_osm_green_visualization(
         logger.error(f"Error creating visualization: {e}")
         import traceback
         traceback.print_exc()
-        return None
-
-
-
-
-def create_green_space_visualization(
-    image: np.ndarray,
-    green_mask: np.ndarray,
-    green_percentage: float,
-    analysis_id: str
-) -> str:
-    """
-    Create visualization overlay showing detected green spaces
-    
-    Args:
-        image: Original RGB image
-        green_mask: Binary mask of green areas
-        green_percentage: Green space percentage
-        analysis_id: Analysis ID for filename
-    
-    Returns:
-        Path to saved visualization image
-    """
-    try:
-        # Create output directory
-        output_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'results')
-        os.makedirs(output_dir, exist_ok=True)
-        
-        # Create green overlay
-        overlay = image.copy()
-        green_overlay = np.zeros_like(image)
-        green_overlay[green_mask > 0] = [0, 255, 0]  # Bright green
-        
-        # Blend overlay with original
-        alpha = 0.5
-        blended = cv2.addWeighted(overlay, 1 - alpha, green_overlay, alpha, 0)
-        
-        # Add text with green percentage
-        font = cv2.FONT_HERSHEY_SIMPLEX
-        text = f"Green Space: {green_percentage:.2f}%"
-        text_size = cv2.getTextSize(text, font, 1, 2)[0]
-        
-        # Add black background for text
-        cv2.rectangle(blended, (10, 10), (20 + text_size[0], 50), (0, 0, 0), -1)
-        
-        # Add white text
-        cv2.putText(blended, text, (20, 40), font, 1, (255, 255, 255), 2)
-        
-        # Save visualization
-        output_filename = f"green_space_{analysis_id}.jpg"
-        output_path = os.path.join(output_dir, output_filename)
-        
-        # Convert back to BGR for saving
-        blended_bgr = cv2.cvtColor(blended, cv2.COLOR_RGB2BGR)
-        cv2.imwrite(output_path, blended_bgr)
-        
-        logger.info(f"Visualization saved: {output_path}")
-        
-        # Return relative path
-        return f"results/{output_filename}"
-        
-    except Exception as e:
-        logger.error(f"Error creating visualization: {e}")
         return None

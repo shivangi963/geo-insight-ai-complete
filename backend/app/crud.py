@@ -10,11 +10,10 @@ backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if backend_dir not in sys.path:
     sys.path.insert(0, backend_dir)
 
-from backend.app.database import get_database
+from .database import get_database
 
 # Helper function to convert MongoDB document to dict
 def document_to_dict(doc: Dict) -> Dict:
-    """Convert MongoDB document to dictionary with string ID"""
     if doc and "_id" in doc:
         doc["id"] = str(doc["_id"])
         del doc["_id"]
@@ -23,7 +22,6 @@ def document_to_dict(doc: Dict) -> Dict:
 # ==================== PROPERTY CRUD ====================
 
 class PropertyCRUD:
-    """Property CRUD operations using MongoDB"""
     
     def __init__(self):
         self.collection_name = "properties"
