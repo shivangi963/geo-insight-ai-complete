@@ -2,26 +2,21 @@ from typing import List, Optional, Dict, Any
 from pydantic import BaseModel
 from bson import ObjectId
 from datetime import datetime, timedelta
-import sys
-import os
-
-# Add the backend directory to Python path if needed
-backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if backend_dir not in sys.path:
-    sys.path.insert(0, backend_dir)
+import logging
 
 from .database import get_database
 
-# Helper function to convert MongoDB document to dict
+logger = logging.getLogger(__name__)
+
 def document_to_dict(doc: Dict) -> Dict:
+    """Convert MongoDB document to dict with string ID"""
     if doc and "_id" in doc:
         doc["id"] = str(doc["_id"])
         del doc["_id"]
     return doc
 
-# ==================== PROPERTY CRUD ====================
-
 class PropertyCRUD:
+    """Property CRUD operations"""
     
     def __init__(self):
         self.collection_name = "properties"
@@ -30,39 +25,26 @@ class PropertyCRUD:
         """Get all properties with pagination"""
         try:
             db = await get_database()
+            logger.debug(f"Fetching properties: skip={skip}, limit={limit}")
             
-            print(f"\n🔍 PropertyCRUD.get_all_properties() called")
-            print(f"   Database: {db.name}")
-            print(f"   Collection: {self.collection_name}")
-            print(f"   Skip: {skip}, Limit: {limit}")
-            
-            # Check count
             count = await db[self.collection_name].count_documents({})
-            print(f"   Total documents in collection: {count}")
+            logger.debug(f"Total properties in DB: {count}")
             
             if count == 0:
-                print(f"   ⚠️  No documents found in {self.collection_name}")
+                logger.warning("No properties found in database")
                 return []
             
-            # Fetch documents
             cursor = db[self.collection_name].find().skip(skip).limit(limit)
-            
             properties = []
+            
             async for doc in cursor:
-                prop_dict = document_to_dict(doc)
-                properties.append(prop_dict)
+                properties.append(document_to_dict(doc))
             
-            print(f"✅ Retrieved {len(properties)} properties from MongoDB")
-            
-            if len(properties) > 0:
-                print(f"   First property: {properties[0].get('address', 'N/A')}")
-            
+            logger.info(f"Retrieved {len(properties)} properties")
             return properties
             
         except Exception as e:
-            print(f"❌ Error getting properties: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.error(f"Error getting properties: {e}", exc_info=True)
             return []
     
     async def get_property_by_id(self, property_id: str) -> Optional[Dict[str, Any]]:
@@ -70,20 +52,16 @@ class PropertyCRUD:
         try:
             db = await get_database()
             
-            # Try to convert to ObjectId
             try:
                 obj_id = ObjectId(property_id)
                 doc = await db[self.collection_name].find_one({"_id": obj_id})
             except:
-                # If not ObjectId, search by string id
                 doc = await db[self.collection_name].find_one({"id": property_id})
             
-            if doc:
-                return document_to_dict(doc)
-            return None
+            return document_to_dict(doc) if doc else None
             
         except Exception as e:
-            print(f"❌ Error getting property: {e}")
+            logger.error(f"Error getting property {property_id}: {e}")
             return None
     
     async def create_property(self, property_data: BaseModel) -> Dict[str, Any]:
@@ -91,22 +69,18 @@ class PropertyCRUD:
         try:
             db = await get_database()
             
-            # Convert Pydantic model to dict
             property_dict = property_data.dict()
             property_dict["created_at"] = datetime.now()
             property_dict["updated_at"] = datetime.now()
             
-            # Insert into MongoDB
             result = await db[self.collection_name].insert_one(property_dict)
-            
-            # Fetch the created document
             created_doc = await db[self.collection_name].find_one({"_id": result.inserted_id})
             
-            print(f"✅ Created property with ID: {result.inserted_id}")
+            logger.info(f"Created property: {result.inserted_id}")
             return document_to_dict(created_doc)
             
         except Exception as e:
-            print(f"❌ Error creating property: {e}")
+            logger.error(f"Error creating property: {e}")
             raise
     
     async def update_property(self, property_id: str, property_data: BaseModel) -> Optional[Dict[str, Any]]:
@@ -114,11 +88,9 @@ class PropertyCRUD:
         try:
             db = await get_database()
             
-            # Prepare update data
             update_data = property_data.dict(exclude_unset=True)
             update_data["updated_at"] = datetime.now()
             
-            # Try ObjectId first
             try:
                 obj_id = ObjectId(property_id)
                 result = await db[self.collection_name].find_one_and_update(
@@ -134,13 +106,13 @@ class PropertyCRUD:
                 )
             
             if result:
-                print(f"✅ Updated property: {property_id}")
+                logger.info(f"Updated property: {property_id}")
                 return document_to_dict(result)
             
             return None
             
         except Exception as e:
-            print(f"❌ Error updating property: {e}")
+            logger.error(f"Error updating property: {e}")
             return None
     
     async def delete_property(self, property_id: str) -> bool:
@@ -148,7 +120,6 @@ class PropertyCRUD:
         try:
             db = await get_database()
             
-            # Try ObjectId first
             try:
                 obj_id = ObjectId(property_id)
                 result = await db[self.collection_name].delete_one({"_id": obj_id})
@@ -156,14 +127,17 @@ class PropertyCRUD:
                 result = await db[self.collection_name].delete_one({"id": property_id})
             
             if result.deleted_count > 0:
-                print(f"✅ Deleted property: {property_id}")
+                logger.info(f"Deleted property: {property_id}")
                 return True
             
             return False
             
         except Exception as e:
-            print(f"❌ Error deleting property: {e}")
+            logger.error(f"Error deleting property: {e}")
             return False
+
+property_crud = PropertyCRUD()
+
 
 # ==================== NEIGHBORHOOD ANALYSIS CRUD ====================
 
@@ -382,5 +356,3 @@ async def get_recent_satellite_analyses(limit: int = 10) -> list:
             del doc["_id"]
         analyses.append(doc)
     return analyses
-
-property_crud = PropertyCRUD()

@@ -1,9 +1,12 @@
 import os
+import sys
 from celery import Celery
 from kombu import Queue
 from dotenv import load_dotenv
 
 load_dotenv()
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 

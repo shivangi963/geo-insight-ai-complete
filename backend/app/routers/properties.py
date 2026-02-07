@@ -1,10 +1,7 @@
-"""
-Property Management Router
-Extracted from main.py for better organization
-"""
-from fastapi import APIRouter, HTTPException, Query, Request, Depends
+from fastapi import APIRouter, HTTPException, Query
 from typing import List, Optional
 import logging
+
 from ..crud import property_crud
 from ..models import PropertyCreate, PropertyUpdate, PropertyResponse
 from ..database import Database
