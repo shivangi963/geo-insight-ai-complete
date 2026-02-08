@@ -13,12 +13,11 @@ from datetime import datetime
 import time
 from functools import wraps
 import math
-import os
-from PIL import Image
 import requests
-from io import BytesIO
-from fastapi import APIRouter
-import logging
+from PIL import Image
+import io
+import tempfile
+import os
 
 # ✅ FIXED: Configure OSM with timeouts
 ox.settings.log_console = True
@@ -558,15 +557,85 @@ def calculate_walk_score(coordinates: Tuple[float, float], amenities_data: Dict)
         print(f"❌ Error calculating walk score: {e}")
         return 0.0
 
-logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/osm", tags=["osm-green-space"])
 
-def get_osm_map_area(latitude: float, longitude: float, radius_meters: int = 500) -> Optional[Image.Image]:
+def lat_lon_to_tile(latitude: float, longitude: float, zoom: int) -> Tuple[int, int]:
+    """
+    Convert lat/lon to OSM tile coordinates
+    
+    Args:
+        latitude: Latitude in degrees
+        longitude: Longitude in degrees
+        zoom: Zoom level (1-19)
+    
+    Returns:
+        Tuple[int, int]: (tile_x, tile_y)
+    """
+    lat_rad = math.radians(latitude)
+    n = 2.0 ** zoom
+    
+    tile_x = int((longitude + 180.0) / 360.0 * n)
+    tile_y = int((1.0 - math.asinh(math.tan(lat_rad)) / math.pi) / 2.0 * n)
+    
+    return tile_x, tile_y
+
+
+def download_osm_tile(tile_x: int, tile_y: int, zoom: int, timeout: int = 5) -> Optional[Image.Image]:
+    """
+    Download single OSM tile with timeout
+    
+    Args:
+        tile_x: X tile coordinate
+        tile_y: Y tile coordinate
+        zoom: Zoom level
+        timeout: Request timeout in seconds
+    
+    Returns:
+        Optional[Image.Image]: PIL Image or None if failed
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    try:
+        url = f"https://tile.openstreetmap.org/{zoom}/{tile_x}/{tile_y}.png"
+        headers = {'User-Agent': 'GeoInsightAI/1.0 (Educational Project)'}
+        
+        response = requests.get(url, headers=headers, timeout=timeout)
+        
+        if response.status_code == 200:
+            tile_image = Image.open(io.BytesIO(response.content))
+            return tile_image
+        else:
+            logger.warning(f"OSM tile ({tile_x},{tile_y}) returned {response.status_code}")
+            return None
+            
+    except requests.exceptions.Timeout:
+        logger.warning(f"OSM tile ({tile_x},{tile_y}) timeout after {timeout}s")
+        return None
+    except Exception as e:
+        logger.warning(f"OSM tile ({tile_x},{tile_y}) error: {e}")
+        return None
+
+
+def get_osm_map_area(latitude: float, longitude: float, radius_meters: int = 500) -> Optional[str]:
+    """
+    Fetch OSM tiles and save to temp file
+    
+    Args:
+        latitude: Center latitude
+        longitude: Center longitude
+        radius_meters: Search radius in meters
+    
+    Returns:
+        Optional[str]: Path to temporary PNG file, or None if failed
+    """
     import time
+    import logging
+    logger = logging.getLogger(__name__)
     
     logger.info(f"Fetching OSM map for ({latitude:.4f}, {longitude:.4f}), radius={radius_meters}m")
 
+    # Determine zoom level based on radius
     if radius_meters <= 500:
         zoom = 17
     elif radius_meters <= 1000:
@@ -576,9 +645,11 @@ def get_osm_map_area(latitude: float, longitude: float, radius_meters: int = 500
     
     logger.info(f"Using zoom level {zoom}")
     
+    # Get center tile coordinates
     center_x, center_y = lat_lon_to_tile(latitude, longitude, zoom)
     logger.info(f"Center tile: ({center_x}, {center_y})")
     
+    # For small radius, download single tile
     if radius_meters <= 600:
         logger.info("Small radius - downloading 1 tile only")
         
@@ -592,9 +663,19 @@ def get_osm_map_area(latitude: float, longitude: float, radius_meters: int = 500
         
         logger.info(f"✅ Downloaded 1 tile in {elapsed:.1f}s")
         
-        return tile
+        # Save to temp file and return PATH
+        try:
+            fd, temp_path = tempfile.mkstemp(suffix='.png', prefix='osm_map_')
+            os.close(fd)  # Close file descriptor immediately
+            
+            tile.save(temp_path, format='PNG')
+            logger.info(f"✅ Saved map to {temp_path}")
+            
+            return temp_path
+        except Exception as e:
+            logger.error(f"Failed to save tile: {e}")
+            return None
 
-    
     # For larger areas, download 2x2 grid (4 tiles max)
     else:
         logger.info("Large radius - downloading 2x2 grid (4 tiles)")
@@ -619,13 +700,23 @@ def get_osm_map_area(latitude: float, longitude: float, radius_meters: int = 500
         
         logger.info(f"✅ Downloaded {len(tiles)}/4 tiles in {elapsed:.1f}s")
         
+        # If only got 1 tile, use it
         if len(tiles) == 1:
             logger.warning("Only got 1 tile, using it")
             tile = list(tiles.values())[0]
             
-            return tile
+            try:
+                fd, temp_path = tempfile.mkstemp(suffix='.png', prefix='osm_map_')
+                os.close(fd)
+                
+                tile.save(temp_path, format='PNG')
+                logger.info(f"✅ Saved map to {temp_path}")
+                
+                return temp_path
+            except Exception as e:
+                logger.error(f"Failed to save tile: {e}")
+                return None
 
-        
         # Stitch tiles together
         logger.info("Stitching tiles...")
         
@@ -637,4 +728,15 @@ def get_osm_map_area(latitude: float, longitude: float, radius_meters: int = 500
             y_offset = (ty - center_y) * tile_size
             stitched.paste(tile, (x_offset, y_offset))
         
-        return stitched
+        # Save stitched image to temp file
+        try:
+            fd, temp_path = tempfile.mkstemp(suffix='.png', prefix='osm_map_')
+            os.close(fd)
+            
+            stitched.save(temp_path, format='PNG')
+            logger.info(f"✅ Saved stitched map to {temp_path}")
+            
+            return temp_path
+        except Exception as e:
+            logger.error(f"Failed to save stitched image: {e}")
+            return None

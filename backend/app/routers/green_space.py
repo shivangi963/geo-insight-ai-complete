@@ -1,75 +1,33 @@
+"""
+REPLACE your backend/app/routers/green_space.py with this
+Router now imports from geospatial.py instead of defining functions
+"""
 from fastapi import APIRouter, HTTPException, Query
-from typing import Optional, Tuple
-import requests
-from PIL import Image
+from fastapi.responses import StreamingResponse
 import io
-import math
+import os
 import logging
+
+from app.geospatial import get_osm_map_area, download_osm_tile
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/osm", tags=["osm-green-space"])
 
 
-def lat_lon_to_tile(latitude: float, longitude: float, zoom: int) -> Tuple[int, int]:
-    
-    lat_rad = math.radians(latitude)
-    n = 2.0 ** zoom
-    
-    tile_x = int((longitude + 180.0) / 360.0 * n)
-    tile_y = int((1.0 - math.asinh(math.tan(lat_rad)) / math.pi) / 2.0 * n)
-    
-    return tile_x, tile_y
-
-
-def download_osm_tile(tile_x: int, tile_y: int, zoom: int) -> Optional[Image.Image]:
-
-    try:
-        url = f"https://tile.openstreetmap.org/{zoom}/{tile_x}/{tile_y}.png"
-        headers = {'User-Agent': 'GeoInsightAI/1.0 (Educational Project)'}
-        
-        # CRITICAL: 5 second timeout per tile
-        response = requests.get(url, headers=headers, timeout=5)
-        
-        if response.status_code == 200:
-            tile_image = Image.open(io.BytesIO(response.content))
-            return tile_image
-        else:
-            logger.warning(f"OSM tile ({tile_x},{tile_y}) returned {response.status_code}")
-            return None
-    except requests.exceptions.Timeout:
-        logger.warning(f"OSM tile ({tile_x},{tile_y}) timeout after 5s")
-        return None
-    except Exception as e:
-        logger.warning(f"OSM tile ({tile_x},{tile_y}) error: {e}")
-        return None
-
-def stitch_tiles(tiles: dict, min_x: int, min_y: int, max_x: int, max_y: int) -> Image.Image:
-    
-    tile_size = 256
-    
-    width = (max_x - min_x + 1) * tile_size
-    height = (max_y - min_y + 1) * tile_size
-    
-    stitched = Image.new('RGB', (width, height), color=(240, 240, 240))
-    
-    for (tile_x, tile_y), tile_img in tiles.items():
-        x_offset = (tile_x - min_x) * tile_size
-        y_offset = (tile_y - min_y) * tile_size
-        
-        stitched.paste(tile_img, (x_offset, y_offset))
-    
-    return stitched
-
-
-
 @router.get("/tile/{zoom}/{tile_x}/{tile_y}")
-async def get_tile(
-    zoom: int,
-    tile_x: int,
-    tile_y: int
-):
+async def get_tile(zoom: int, tile_x: int, tile_y: int):
+    """
+    Get single OSM tile
     
+    Args:
+        zoom: Zoom level (1-19)
+        tile_x: X tile coordinate
+        tile_y: Y tile coordinate
+    
+    Returns:
+        StreamingResponse: PNG image
+    """
     try:
         tile_img = download_osm_tile(tile_x, tile_y, zoom)
         
@@ -81,7 +39,6 @@ async def get_tile(
         tile_img.save(img_byte_arr, format='PNG')
         img_byte_arr.seek(0)
         
-        from fastapi.responses import StreamingResponse
         return StreamingResponse(img_byte_arr, media_type="image/png")
         
     except HTTPException:
@@ -95,23 +52,37 @@ async def get_tile(
 async def get_map_image(
     latitude: float = Query(..., ge=-90, le=90, description="Latitude"),
     longitude: float = Query(..., ge=-180, le=180, description="Longitude"),
-    radius_m: int = Query(500, ge=100, le=5000, description="Radius in meters"),
-    zoom: int = Query(17, ge=1, le=19, description="Zoom level")
+    radius_m: int = Query(500, ge=100, le=5000, description="Radius in meters")
 ):
+    """
+    Get map image for coordinates
     
+    Args:
+        latitude: Center latitude
+        longitude: Center longitude
+        radius_m: Search radius in meters
+    
+    Returns:
+        StreamingResponse: PNG image
+    """
     try:
-        map_image = get_osm_map_area(latitude, longitude, radius_m)
+        # Get map from geospatial utility
+        map_path = get_osm_map_area(latitude, longitude, radius_m)
         
-        if not map_image:
+        if not map_path:
             raise HTTPException(status_code=500, detail="Failed to generate map")
         
-        # Convert to bytes
-        img_byte_arr = io.BytesIO()
-        map_image.save(img_byte_arr, format='PNG')
-        img_byte_arr.seek(0)
+        # Read from temp file
+        with open(map_path, 'rb') as f:
+            img_data = f.read()
         
-        from fastapi.responses import StreamingResponse
-        return StreamingResponse(img_byte_arr, media_type="image/png")
+        # Clean up temp file
+        try:
+            os.unlink(map_path)
+        except:
+            pass
+        
+        return StreamingResponse(io.BytesIO(img_data), media_type="image/png")
         
     except HTTPException:
         raise
@@ -124,6 +95,9 @@ async def get_map_image(
 async def get_osm_info():
     """
     Get information about OSM tile service
+    
+    Returns:
+        dict: Service information
     """
     return {
         "service": "OpenStreetMap Tile Service",
