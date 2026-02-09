@@ -1,6 +1,6 @@
 """
 Computer Vision Module for Green Space Analysis - UPDATED VERSION
-Uses dark matte green colors and reduced image size
+Single pear green color and 50% image size
 """
 import cv2
 import numpy as np
@@ -213,28 +213,21 @@ def create_osm_green_visualization(
     green_percentage: float,
     analysis_id: str
 ) -> str:
-    """Create visualization with detected green areas highlighted - DARK MATTE COLORS & 40% SIZE REDUCTION"""
+    """Create visualization with detected green areas - SINGLE PEAR GREEN & 50% SIZE"""
     try:
         # Create output directory
         output_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'results')
         os.makedirs(output_dir, exist_ok=True)
         
-        # Create colored overlay for different green types
+        # Create colored overlay
         overlay = image.copy()
         colored_overlay = np.zeros_like(image)
         
-        # ✅ UPDATED: Dark matte green colors (instead of bright greens)
-        colors = {
-            'parks_grass': [60, 120, 60],        # Dark matte green
-            'forests_woods': [30, 80, 30],       # Darker forest green
-            'recreation': [50, 100, 70],         # Dark matte olive
-            'natural_areas': [70, 130, 70]       # Medium dark green
-        }
+        # ✅ SINGLE PEAR GREEN COLOR (RGB: 136, 176, 75)
+        pear_green = [136, 176, 75]
         
-        # Apply colored overlays
-        for green_type, mask in green_masks.items():
-            color = colors.get(green_type, [0, 100, 0])  # Default dark green
-            colored_overlay[mask > 0] = color
+        # Apply SINGLE color to ALL green areas
+        colored_overlay[combined_mask > 0] = pear_green
         
         # Blend overlay with original
         alpha = 0.5
@@ -242,7 +235,7 @@ def create_osm_green_visualization(
         
         # Add border around detected areas
         contours, _ = cv2.findContours(combined_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        cv2.drawContours(blended, contours, -1, (0, 180, 0), 2)  # Darker green border
+        cv2.drawContours(blended, contours, -1, pear_green, 2)  # Pear green border
         
         # Add text with statistics
         font = cv2.FONT_HERSHEY_SIMPLEX
@@ -255,35 +248,28 @@ def create_osm_green_visualization(
         cv2.rectangle(blended, (10, 10), (30 + text_size[0], 60), (0, 0, 0), -1)
         cv2.putText(blended, main_text, (20, 40), font, 1, (255, 255, 255), 2)
         
-        # Add legend with dark colors
+        # Add simple legend (single color)
         y_offset = 80
-        legend_items = [
-            ("Parks/Grass", colors['parks_grass']),
-            ("Forests/Woods", colors['forests_woods']),
-            ("Recreation", colors['recreation']),
-            ("Natural Areas", colors['natural_areas'])
-        ]
         
-        for label, color in legend_items:
-            # Color box
-            cv2.rectangle(blended, (10, y_offset), (40, y_offset + 20), color, -1)
-            cv2.rectangle(blended, (10, y_offset), (40, y_offset + 20), (0, 0, 0), 1)
-            
-            # Label with background
-            label_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)[0]
-            cv2.rectangle(blended, (45, y_offset), (55 + label_size[0], y_offset + 25), (0, 0, 0), -1)
-            cv2.putText(blended, label, (50, y_offset + 15), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-            
-            y_offset += 30
+        # Single legend item
+        # Color box
+        cv2.rectangle(blended, (10, y_offset), (40, y_offset + 20), pear_green, -1)
+        cv2.rectangle(blended, (10, y_offset), (40, y_offset + 20), (0, 0, 0), 1)
         
-        # ✅ RESIZE IMAGE BY 60% (40% reduction)
-        scale_factor = 0.6
+        # Label with background
+        label = "Green Spaces"
+        label_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)[0]
+        cv2.rectangle(blended, (45, y_offset), (55 + label_size[0], y_offset + 25), (0, 0, 0), -1)
+        cv2.putText(blended, label, (50, y_offset + 15), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        
+        # ✅ RESIZE IMAGE TO 50% (HALF SIZE)
+        scale_factor = 0.5
         new_width = int(blended.shape[1] * scale_factor)
         new_height = int(blended.shape[0] * scale_factor)
         blended = cv2.resize(blended, (new_width, new_height), interpolation=cv2.INTER_AREA)
         
-        logger.info(f"📏 Resized visualization: {new_width}x{new_height} (60% of original)")
+        logger.info(f"📏 Resized visualization: {new_width}x{new_height} (50% of original)")
         
         # Save visualization
         output_filename = f"osm_green_space_{analysis_id}.png"

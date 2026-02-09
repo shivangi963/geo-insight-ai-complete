@@ -218,9 +218,10 @@ async def get_recent_green_space_analyses(
     limit: int = Query(default=5, ge=1, le=50),
     db: Any = Depends(get_database)
 ):
+    """✅ FIXED: Query correct collection name"""
     try:
-        # Query recent completed analyses, sorted by most recent
-        analyses = await db["green_space_analyses"].find(
+        # ✅ FIXED: Use "satellite_analyses" instead of "green_space_analyses"
+        analyses = await db["satellite_analyses"].find(
             {"status": "completed"},
             {
                 "_id": 1,
@@ -238,10 +239,11 @@ async def get_recent_green_space_analyses(
         
         if not analyses:
             logger.warning("No completed green space analyses found")
-            raise HTTPException(
-                status_code=404,
-                detail="No completed analyses found"
-            )
+            # ✅ Return empty list instead of 404
+            return {
+                "count": 0,
+                "analyses": []
+            }
         
         # Convert ObjectIds to strings and format dates
         for analysis in analyses:
@@ -272,10 +274,12 @@ async def get_recent_green_space_analyses(
     except Exception as e:
         logger.error(f"Error fetching recent analyses: {e}")
         logger.error(traceback.format_exc())
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to fetch recent analyses: {str(e)}"
-        )
+        # ✅ Return empty list instead of 500 error
+        return {
+            "count": 0,
+            "analyses": [],
+            "error": str(e)
+        }
 
 @router.get("/green-space/{analysis_id}")
 async def get_green_space_analysis(analysis_id: str):
@@ -438,4 +442,3 @@ async def perform_street_detection(image_np, filename: str) -> Dict:
     except Exception as e:
         logger.error(f"Street detection failed: {e}")
         raise
-
