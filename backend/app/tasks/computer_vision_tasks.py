@@ -1,6 +1,6 @@
 """
-Computer Vision Module for Green Space Analysis - FIXED VERSION
-Uses CORRECT OpenStreetMap color values
+Computer Vision Module for Green Space Analysis - UPDATED VERSION
+Uses dark matte green colors and reduced image size
 """
 import cv2
 import numpy as np
@@ -213,7 +213,7 @@ def create_osm_green_visualization(
     green_percentage: float,
     analysis_id: str
 ) -> str:
-    """Create visualization with detected green areas highlighted"""
+    """Create visualization with detected green areas highlighted - DARK MATTE COLORS & 40% SIZE REDUCTION"""
     try:
         # Create output directory
         output_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'results')
@@ -223,17 +223,17 @@ def create_osm_green_visualization(
         overlay = image.copy()
         colored_overlay = np.zeros_like(image)
         
-        # Different colors for each green type
+        # ✅ UPDATED: Dark matte green colors (instead of bright greens)
         colors = {
-            'parks_grass': [144, 238, 144],      # Light green
-            'forests_woods': [34, 139, 34],      # Forest green
-            'recreation': [60, 179, 113],        # Medium sea green
-            'natural_areas': [152, 251, 152]     # Pale green
+            'parks_grass': [60, 120, 60],        # Dark matte green
+            'forests_woods': [30, 80, 30],       # Darker forest green
+            'recreation': [50, 100, 70],         # Dark matte olive
+            'natural_areas': [70, 130, 70]       # Medium dark green
         }
         
         # Apply colored overlays
         for green_type, mask in green_masks.items():
-            color = colors.get(green_type, [0, 255, 0])
+            color = colors.get(green_type, [0, 100, 0])  # Default dark green
             colored_overlay[mask > 0] = color
         
         # Blend overlay with original
@@ -242,7 +242,7 @@ def create_osm_green_visualization(
         
         # Add border around detected areas
         contours, _ = cv2.findContours(combined_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        cv2.drawContours(blended, contours, -1, (0, 255, 0), 2)
+        cv2.drawContours(blended, contours, -1, (0, 180, 0), 2)  # Darker green border
         
         # Add text with statistics
         font = cv2.FONT_HERSHEY_SIMPLEX
@@ -255,7 +255,7 @@ def create_osm_green_visualization(
         cv2.rectangle(blended, (10, 10), (30 + text_size[0], 60), (0, 0, 0), -1)
         cv2.putText(blended, main_text, (20, 40), font, 1, (255, 255, 255), 2)
         
-        # Add legend
+        # Add legend with dark colors
         y_offset = 80
         legend_items = [
             ("Parks/Grass", colors['parks_grass']),
@@ -277,6 +277,14 @@ def create_osm_green_visualization(
             
             y_offset += 30
         
+        # ✅ RESIZE IMAGE BY 60% (40% reduction)
+        scale_factor = 0.6
+        new_width = int(blended.shape[1] * scale_factor)
+        new_height = int(blended.shape[0] * scale_factor)
+        blended = cv2.resize(blended, (new_width, new_height), interpolation=cv2.INTER_AREA)
+        
+        logger.info(f"📏 Resized visualization: {new_width}x{new_height} (60% of original)")
+        
         # Save visualization
         output_filename = f"osm_green_space_{analysis_id}.png"
         output_path = os.path.join(output_dir, output_filename)
@@ -285,7 +293,7 @@ def create_osm_green_visualization(
         blended_bgr = cv2.cvtColor(blended, cv2.COLOR_RGB2BGR)
         cv2.imwrite(output_path, blended_bgr)
         
-        logger.info(f" Visualization saved: {output_path}")
+        logger.info(f"✅ Visualization saved: {output_path}")
         
         # Return relative path
         return f"results/{output_filename}"

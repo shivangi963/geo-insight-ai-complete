@@ -1,7 +1,3 @@
-"""
-REPLACE your backend/app/tasks/satellite_tasks.py with this
-Now imports from geospatial.py instead of router
-"""
 from celery import shared_task
 from datetime import datetime
 from bson import ObjectId
@@ -60,13 +56,11 @@ def analyze_satellite_task(self, analysis_id: str, request_data: dict) -> dict:
             'coordinates': {'latitude': lat, 'longitude': lon}
         })
         
-        # Fetch OSM map (returns temp file path)
         temp_path = get_osm_map_area(lat, lon, radius_m)
         
         if not temp_path:
             raise Exception("Failed to fetch OpenStreetMap tiles")
         
-        # Verify file exists
         if not os.path.exists(temp_path):
             raise Exception(f"Map file not found: {temp_path}")
         
@@ -150,15 +144,7 @@ def analyze_satellite_task(self, analysis_id: str, request_data: dict) -> dict:
 
 
 def update_analysis_status_sync(db, analysis_id: str, status: str, updates: dict = None):
-    """
-    Synchronous version of update_analysis_status for Celery tasks
     
-    Args:
-        db: Synchronous MongoDB database connection
-        analysis_id: Analysis document ID
-        status: New status
-        updates: Additional fields to update
-    """
     try:
         update_data = {
             'status': status,
