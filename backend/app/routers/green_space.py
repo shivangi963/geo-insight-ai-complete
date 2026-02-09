@@ -8,7 +8,7 @@ import io
 import os
 import logging
 
-from app.geospatial import get_osm_map_area, download_osm_tile
+from ..geospatial import get_osm_map_area, download_osm_tile
 
 logger = logging.getLogger(__name__)
 
@@ -17,17 +17,7 @@ router = APIRouter(prefix="/api/osm", tags=["osm-green-space"])
 
 @router.get("/tile/{zoom}/{tile_x}/{tile_y}")
 async def get_tile(zoom: int, tile_x: int, tile_y: int):
-    """
-    Get single OSM tile
     
-    Args:
-        zoom: Zoom level (1-19)
-        tile_x: X tile coordinate
-        tile_y: Y tile coordinate
-    
-    Returns:
-        StreamingResponse: PNG image
-    """
     try:
         tile_img = download_osm_tile(tile_x, tile_y, zoom)
         

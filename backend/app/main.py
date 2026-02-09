@@ -181,9 +181,12 @@ app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(RequestLoggingMiddleware)
 app.add_middleware(RequestValidationMiddleware)
 app.add_middleware(RateLimitHeaderMiddleware)
-
-# Compression
 app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+results_dir = os.path.join(os.path.dirname(__file__), "..", "results")
+os.makedirs(results_dir, exist_ok=True)
+app.mount("/results", StaticFiles(directory=results_dir), name="results")
+logger.info(f"Mounted static files: /results → {results_dir}")
 
 # Rate limiter state
 if RATE_LIMITING_AVAILABLE:

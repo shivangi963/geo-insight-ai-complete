@@ -1,13 +1,11 @@
-"""
-Image Analysis Router - Fixed Imports
-Handles both green space analysis and street scene detection
-"""
-from fastapi import APIRouter, HTTPException, UploadFile, File, Query, BackgroundTasks
+from fastapi import APIRouter, HTTPException, UploadFile, File, Query, BackgroundTasks, Depends
 from typing import Dict, Any, Optional
 import logging
 from datetime import datetime
-import tempfile
 import os
+import traceback
+
+from app.database import get_database
 
 logger = logging.getLogger(__name__)
 
@@ -107,7 +105,7 @@ async def process_green_space_analysis(
     """
     try:
         from ..crud import update_analysis_status
-        from ..geospatial import LocationGeocoder
+        from ..geospatial import LocationGeocoder, get_osm_map_area
         from ..tasks.computer_vision_tasks import analyze_osm_green_spaces
         import asyncio
         
@@ -139,19 +137,7 @@ async def process_green_space_analysis(
             "coordinates": {"latitude": lat, "longitude": lon}
         })
         
-        # Import OSM functions
-        import sys
-        import os
-        
-        # Add backend directory to path if needed
-        backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        if backend_dir not in sys.path:
-            sys.path.insert(0, backend_dir)
-        
-        # Import from osm_green_space router
-        from app.routers.green_space import get_osm_map_area
-        
-        # Fetch OSM map
+
         map_path = await asyncio.to_thread(
             get_osm_map_area,
             lat, lon, radius_m
@@ -227,6 +213,70 @@ async def process_green_space_analysis(
         })
 
 
+@router.get("/analysis/green-space/recent")
+async def get_recent_green_space_analyses(
+    limit: int = Query(default=5, ge=1, le=50),
+    db: Any = Depends(get_database)
+):
+    try:
+        # Query recent completed analyses, sorted by most recent
+        analyses = await db["green_space_analyses"].find(
+            {"status": "completed"},
+            {
+                "_id": 1,
+                "address": 1,
+                "coordinates": 1,
+                "search_radius_m": 1,
+                "green_space_percentage": 1,
+                "breakdown": 1,
+                "visualization_path": 1,
+                "map_source": 1,
+                "created_at": 1,
+                "completed_at": 1
+            }
+        ).sort("completed_at", -1).limit(limit).to_list(length=limit)
+        
+        if not analyses:
+            logger.warning("No completed green space analyses found")
+            raise HTTPException(
+                status_code=404,
+                detail="No completed analyses found"
+            )
+        
+        # Convert ObjectIds to strings and format dates
+        for analysis in analyses:
+            analysis["_id"] = str(analysis["_id"])
+            
+            # Ensure dates are ISO format strings
+            if "created_at" in analysis and analysis["created_at"]:
+                if hasattr(analysis["created_at"], "isoformat"):
+                    analysis["created_at"] = analysis["created_at"].isoformat()
+                else:
+                    analysis["created_at"] = str(analysis["created_at"])
+                    
+            if "completed_at" in analysis and analysis["completed_at"]:
+                if hasattr(analysis["completed_at"], "isoformat"):
+                    analysis["completed_at"] = analysis["completed_at"].isoformat()
+                else:
+                    analysis["completed_at"] = str(analysis["completed_at"])
+        
+        logger.info(f"✅ Retrieved {len(analyses)} recent green space analyses")
+        
+        return {
+            "count": len(analyses),
+            "analyses": analyses
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching recent analyses: {e}")
+        logger.error(traceback.format_exc())
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to fetch recent analyses: {str(e)}"
+        )
+
 @router.get("/green-space/{analysis_id}")
 async def get_green_space_analysis(analysis_id: str):
     """
@@ -259,20 +309,6 @@ async def get_green_space_analysis(analysis_id: str):
         logger.error(f"Failed to get analysis {analysis_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to retrieve analysis")
 
-
-@router.get("/green-space/recent")
-async def get_recent_green_space_analyses(limit: int = Query(10, ge=1, le=50)):
-    """Get recent green space analyses"""
-    try:
-        from ..crud import get_recent_satellite_analyses
-        
-        analyses = await get_recent_satellite_analyses(limit)
-        
-        return {"analyses": analyses}
-        
-    except Exception as e:
-        logger.error(f"Failed to get recent analyses: {e}")
-        return {"analyses": []}
 
 
 # ==================== STREET SCENE DETECTION ====================
