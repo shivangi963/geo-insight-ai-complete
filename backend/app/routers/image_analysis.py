@@ -213,7 +213,7 @@ async def process_green_space_analysis(
         })
 
 
-@router.get("/analysis/green-space/recent")
+@router.get("/green-space/recent")
 async def get_recent_green_space_analyses(
     limit: int = Query(default=5, ge=1, le=50),
     db: Any = Depends(get_database)
