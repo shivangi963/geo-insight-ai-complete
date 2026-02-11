@@ -209,7 +209,8 @@ class NeighborhoodSimilarityEngine:
         query_analysis: Dict,
         all_analyses: List[Dict],
         limit: int = 5,
-        threshold: float = 0.6
+        threshold: float = 0.6,
+        query_address: str = None
     ) -> List[Dict]:
         """
         Find similar neighborhoods from database
@@ -240,6 +241,11 @@ class NeighborhoodSimilarityEngine:
             # Skip incomplete analyses
             if analysis.get('status') != 'completed':
                 continue
+
+            if query_address:
+                candidate_address = analysis.get('address', '').strip().lower()
+                if candidate_address == query_address:
+                    continue
             
             # Extract features
             try:

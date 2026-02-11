@@ -1,7 +1,3 @@
-"""
-Neighborhood Analysis Page - Simplified Version
-Map display features removed
-"""
 import streamlit as st
 from api_client import api
 from utils import (
@@ -23,13 +19,18 @@ def render_neighborhood_page():
     # Analysis form
     analysis_triggered = render_analysis_form(default_address)
     
+    # ✅ NEW: Display stored analysis if available
+    if not analysis_triggered and 'current_analysis' in st.session_state:
+        stored = st.session_state.current_analysis
+        display_analysis_results(stored['result'], stored['analysis_id'])
+    
     st.divider()
     
     # Recent analyses
     render_recent_analyses()
 
 def render_analysis_form(default_address: str = '') -> bool:
-    """Render form and return True if analysis was triggered"""
+    """Render form and return True if analysis was triggered - FIXED"""
     with st.form("neighborhood_form"):
         address = st.text_input(
             "📍 Enter Full Address",
@@ -70,6 +71,10 @@ def render_analysis_form(default_address: str = '') -> bool:
             show_error_message("Select at least one amenity type")
             return False
         
+        # ✅ NEW: Clear previous analysis before starting new one
+        if 'current_analysis' in st.session_state:
+            del st.session_state.current_analysis
+        
         handle_analysis_submission(address, radius, amenities_selected)
         return True
     
@@ -104,8 +109,9 @@ def render_amenity_selector() -> list:
     
     return amenities_selected
 
+
 def handle_analysis_submission(address: str, radius: int, amenities: list):
-    """Handle analysis submission - OUTSIDE form context"""
+    """Handle analysis submission - FIXED to persist results"""
     st.divider()
     st.subheader("🔄 Running Analysis")
     
@@ -146,13 +152,30 @@ def handle_analysis_submission(address: str, radius: int, amenities: list):
         })
         st.session_state.analysis_history = history[-10:]
         
+        # ✅ NEW: Store current analysis in session state
+        st.session_state.current_analysis = {
+            'result': result,
+            'analysis_id': analysis_id
+        }
+        
         # Display results
         display_analysis_results(result, analysis_id)
 
+
+
 def display_analysis_results(result: dict, analysis_id: str, generate_map: bool = True):
-    """Display analysis results"""
+    """Display analysis results with comparison feature - FIXED"""
     st.divider()
-    st.subheader("✅ Analysis Results")
+    
+    # Add header with clear button
+    col1, col2 = st.columns([4, 1])
+    with col1:
+        st.subheader("✅ Analysis Results")
+    with col2:
+        if st.button("🗑️ Clear Results", key="clear_analysis"):
+            if 'current_analysis' in st.session_state:
+                del st.session_state.current_analysis
+            st.rerun()
     
     render_key_metrics(result)
     render_walkability_interpretation(result.get('walk_score', 0))
@@ -163,6 +186,12 @@ def display_analysis_results(result: dict, analysis_id: str, generate_map: bool 
     
     if generate_map:
         render_interactive_map(analysis_id)
+    
+    # Add "Find Similar" button
+    st.divider()
+    render_similarity_search_section(analysis_id, result)
+
+
 
 def render_key_metrics(result: dict):
     """Render key metrics cards"""
@@ -348,28 +377,8 @@ def render_analysis_card(analysis: dict):
                     display_analysis_results(full_analysis, analysis_id)
 
 
-def display_analysis_results(result: dict, analysis_id: str, generate_map: bool = True):
-    """Display analysis results with comparison feature"""
-    st.divider()
-    st.subheader("✅ Analysis Results")
-    
-    render_key_metrics(result)
-    render_walkability_interpretation(result.get('walk_score', 0))
-    
-    amenities = result.get('amenities', {})
-    if amenities:
-        render_amenities_breakdown(amenities)
-    
-    if generate_map:
-        render_interactive_map(analysis_id)
-    
-    # ✨ NEW: Add "Find Similar" button
-    st.divider()
-    render_similarity_search_section(analysis_id, result)
-
-
 def render_similarity_search_section(analysis_id: str, query_analysis: dict):
-    """Render similarity search section"""
+    """Render similarity search section - ALREADY FIXED"""
     st.subheader("🔍 Find Similar Neighborhoods")
     
     st.markdown("""
@@ -379,25 +388,38 @@ def render_similarity_search_section(analysis_id: str, query_analysis: dict):
     
     col1, col2, col3 = st.columns([2, 1, 1])
     
-    with col1:
-        if st.button("🔍 Find Similar Neighborhoods", type="primary", use_container_width=True, key=f"find_similar_{analysis_id}"):
-            find_and_display_similar(analysis_id, query_analysis)
+    limit_key = f"limit_{analysis_id}"
+    threshold_key = f"threshold_{analysis_id}"
+    results_key = f"similarity_results_{analysis_id}"
     
     with col2:
-        limit = st.number_input("Results", min_value=1, max_value=20, value=5, key=f"limit_{analysis_id}")
+        limit = st.number_input("Results", min_value=1, max_value=20, value=5, key=limit_key)
     
     with col3:
-        threshold = st.number_input("Min Match %", min_value=0, max_value=100, value=60, key=f"threshold_{analysis_id}")
+        threshold = st.number_input("Min Match %", min_value=0, max_value=100, value=60, key=threshold_key)
+    
+    with col1:
+        if st.button("🔍 Find Similar Neighborhoods", type="primary", use_container_width=True, key=f"find_similar_{analysis_id}"):
+            find_and_display_similar(analysis_id, query_analysis, results_key)
+    
+    # Display stored results if available
+    if results_key in st.session_state and st.session_state[results_key] is not None:
+        st.divider()
+        stored_data = st.session_state[results_key]
+        render_comparison_results(
+            query_analysis,
+            stored_data['similar_neighborhoods'],
+            stored_data['report']
+        )
 
 
-def find_and_display_similar(analysis_id: str, query_analysis: dict):
-    """Find and display similar neighborhoods"""
+def find_and_display_similar(analysis_id: str, query_analysis: dict, results_key: str):
+    """Find and display similar neighborhoods - ALREADY FIXED"""
     from api_client import api
     import requests
     
     with st.spinner("🔍 Searching for similar neighborhoods..."):
         try:
-            # Get similarity threshold from session state
             threshold = st.session_state.get(f"threshold_{analysis_id}", 60) / 100
             limit = st.session_state.get(f"limit_{analysis_id}", 5)
             
@@ -412,28 +434,31 @@ def find_and_display_similar(analysis_id: str, query_analysis: dict):
             
             if response.status_code != 200:
                 st.error(f"❌ Search failed: {response.text}")
+                st.session_state[results_key] = None
                 return
             
             result = response.json()
         
         except Exception as e:
             st.error(f"❌ Error: {e}")
+            st.session_state[results_key] = None
             return
     
-    # Display results
     report = result.get('report', {})
     similar_neighborhoods = report.get('similar_neighborhoods', [])
     
     if not similar_neighborhoods:
         st.info("ℹ️ No similar neighborhoods found")
         st.caption(f"Try lowering the minimum match percentage (currently {threshold*100:.0f}%)")
+        st.session_state[results_key] = None
         return
     
     st.success(f"✅ Found {len(similar_neighborhoods)} similar neighborhoods!")
     
-    # Display comparison
-    render_comparison_results(query_analysis, similar_neighborhoods, report)
-
+    st.session_state[results_key] = {
+        'similar_neighborhoods': similar_neighborhoods,
+        'report': report
+    }
 
 def render_comparison_results(query_analysis: dict, similar_neighborhoods: list, report: dict):
     """Render detailed comparison results"""
@@ -461,7 +486,7 @@ def render_comparison_results(query_analysis: dict, similar_neighborhoods: list,
 
 
 def render_similarity_card(neighborhood: dict, idx: int, query_info: dict):
-    """Render individual similarity result card"""
+    """Render individual similarity result card - FIXED: No nested expanders"""
     similarity = neighborhood.get('similarity_score', 0) * 100
     address = neighborhood.get('address', 'Unknown')
     
@@ -510,14 +535,21 @@ def render_similarity_card(neighborhood: dict, idx: int, query_info: dict):
             for diff in differences:
                 st.write(f"• {diff}")
         
-        # Amenity breakdown comparison
-        with st.expander("📊 Detailed Amenity Comparison"):
+        # ✅ FIX: Replace nested expander with checkbox
+        st.divider()
+        show_comparison = st.checkbox(
+            "📊 Show Detailed Amenity Comparison", 
+            key=f"show_amenities_{idx}_{analysis_id}"
+        )
+        
+        if show_comparison:
             render_amenity_comparison(
                 query_info.get('amenity_breakdown', {}),
                 neighborhood.get('amenity_breakdown', {})
             )
         
         # Map preview
+        st.divider()
         map_path = neighborhood.get('map_path')
         coordinates = neighborhood.get('coordinates')
         

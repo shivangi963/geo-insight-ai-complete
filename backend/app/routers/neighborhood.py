@@ -320,11 +320,6 @@ async def find_similar_neighborhoods(
     limit: int = Query(5, ge=1, le=20, description="Number of similar neighborhoods"),
     threshold: float = Query(0.6, ge=0.0, le=1.0, description="Minimum similarity score")
 ):
-    """
-    Find neighborhoods similar to this analysis
-    
-    Returns ranked list of comparable locations from entire database
-    """
     try:
         from ..similarity_engine import similarity_engine
         
@@ -335,6 +330,8 @@ async def find_similar_neighborhoods(
         
         if not query_analysis:
             raise HTTPException(status_code=404, detail="Analysis not found")
+        
+        query_address = query_analysis.get('address', '').strip().lower()
         
         if query_analysis.get('status') != 'completed':
             raise HTTPException(
@@ -362,7 +359,8 @@ async def find_similar_neighborhoods(
             query_analysis=query_analysis,
             all_analyses=all_analyses,
             limit=limit,
-            threshold=threshold
+            threshold=threshold,
+            query_address=query_address
         )
         
         # Create comparison report
