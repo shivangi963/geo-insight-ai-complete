@@ -223,8 +223,9 @@ def create_osm_green_visualization(
         overlay = image.copy()
         colored_overlay = np.zeros_like(image)
         
-        # ✅ SINGLE PEAR GREEN COLOR (RGB: 136, 176, 75)
-        pear_green = [136, 176, 75]
+        # ✅ SINGLE DARK GREEN COLOR (RGB: 34, 139, 34) - clearer, darker overlay
+        # Use a darker, more contrasting green so it appears clearly on the frontend
+        pear_green = [34, 139, 34]
         
         # Apply SINGLE color to ALL green areas
         colored_overlay[combined_mask > 0] = pear_green

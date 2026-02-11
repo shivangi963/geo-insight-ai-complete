@@ -192,7 +192,7 @@ def render_search_image_preview(uploaded_file):
         st.info(f"**Size:** {uploaded_file.size / 1024:.1f} KB")
 
 def handle_vector_search(uploaded_file, limit: int, threshold: float):
-    """Execute vector similarity search - FIXED VERSION"""
+    """Execute vector similarity search with better error handling"""
     from api_client import api
     
     if not validate_file_size(uploaded_file, 10):
@@ -200,7 +200,6 @@ def handle_vector_search(uploaded_file, limit: int, threshold: float):
     
     st.divider()
     
-    # Use the new search function
     with st.spinner("🔍 Searching for similar properties..."):
         result = search_similar_properties(
             api_url=api.base_url,
@@ -212,16 +211,37 @@ def handle_vector_search(uploaded_file, limit: int, threshold: float):
     if not result:
         return
     
-    # Display results
-    results = result.get('results', [])
-    
-    if not results:
-        st.info("❌ No similar properties found")
-        st.caption(f"Try lowering the similarity threshold (currently {threshold})")
+    # Check for error details in response
+    if result.get('error'):
+        error_detail = result.get('detail', {})
+        if isinstance(error_detail, dict):
+            st.error(f"❌ {error_detail.get('error', 'Unknown error')}")
+            st.info(f"💡 {error_detail.get('message', '')}")
+            
+            # Show setup instructions if available
+            instructions = error_detail.get('instructions')
+            if instructions:
+                with st.expander("📚 Setup Instructions"):
+                    st.code(instructions)
+        else:
+            st.error(f"❌ {error_detail}")
         return
     
-    show_success_message(f"Found {len(results)} similar properties")
+    # Check for empty results
+    results = result.get('results', [])
+    total_db_size = result.get('database_size', 0)
+    
+    if not results:
+        st.warning("❌ No similar properties found")
+        st.info(f"🔍 Database size: {total_db_size} properties")
+        st.info(f"📊 Current threshold: {threshold}")
+        st.caption("💡 Try lowering the similarity threshold or adding more properties to the database")
+        return
+    
+    show_success_message(f"Found {len(results)}/{total_db_size} similar properties")
     render_search_results(results)
+
+    
 
 def render_search_results(results: list):
     """Display search results"""

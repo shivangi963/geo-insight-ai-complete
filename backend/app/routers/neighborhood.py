@@ -312,3 +312,131 @@ async def get_analysis_map(analysis_id: str):
     except Exception as e:
         logger.error(f"Failed to get map for {analysis_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+    
+
+@router.get("/{analysis_id}/similar")
+async def find_similar_neighborhoods(
+    analysis_id: str,
+    limit: int = Query(5, ge=1, le=20, description="Number of similar neighborhoods"),
+    threshold: float = Query(0.6, ge=0.0, le=1.0, description="Minimum similarity score")
+):
+    """
+    Find neighborhoods similar to this analysis
+    
+    Returns ranked list of comparable locations from entire database
+    """
+    try:
+        from ..similarity_engine import similarity_engine
+        
+        logger.info(f"Finding similar neighborhoods for {analysis_id}")
+        
+        # Get the query analysis
+        query_analysis = await get_neighborhood_analysis(analysis_id)
+        
+        if not query_analysis:
+            raise HTTPException(status_code=404, detail="Analysis not found")
+        
+        if query_analysis.get('status') != 'completed':
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Analysis not completed. Status: {query_analysis.get('status')}"
+            )
+        
+        # Get all completed analyses from database
+        from ..database import get_database
+        db = await get_database()
+        
+        cursor = db.neighborhood_analyses.find({'status': 'completed'})
+        all_analyses = []
+        
+        async for doc in cursor:
+            if "_id" in doc:
+                doc["id"] = str(doc["_id"])
+                del doc["_id"]
+            all_analyses.append(doc)
+        
+        logger.info(f"Comparing against {len(all_analyses)} completed analyses")
+        
+        # Find similar neighborhoods
+        similar = similarity_engine.find_similar_neighborhoods(
+            query_analysis=query_analysis,
+            all_analyses=all_analyses,
+            limit=limit,
+            threshold=threshold
+        )
+        
+        # Create comparison report
+        report = similarity_engine.create_comparison_report(
+            query_analysis=query_analysis,
+            similar_neighborhoods=similar
+        )
+        
+        logger.info(f"Found {len(similar)} similar neighborhoods")
+        
+        return {
+            'status': 'success',
+            'query_analysis_id': analysis_id,
+            'total_found': len(similar),
+            'threshold_used': threshold,
+            'report': report
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error finding similar neighborhoods: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+    
+@router.get("/{analysis_id}/generate-image")
+async def generate_location_image(analysis_id: str):
+    """
+    Generate a representative image for this location
+    Uses OpenStreetMap tiles
+    """
+    try:
+        from ..image_generator import image_generator
+        
+        analysis = await get_neighborhood_analysis(analysis_id)
+        
+        if not analysis:
+            raise HTTPException(status_code=404, detail="Analysis not found")
+        
+        coordinates = analysis.get('coordinates')
+        if not coordinates:
+            raise HTTPException(status_code=400, detail="No coordinates available")
+        
+        # Get lat/lon
+        if isinstance(coordinates, (list, tuple)):
+            lat, lon = coordinates
+        else:
+            lat = coordinates.get('latitude')
+            lon = coordinates.get('longitude')
+        
+        # Generate image
+        image_path = image_generator.generate_osm_static_map(
+            latitude=lat,
+            longitude=lon,
+            zoom=15,
+            width=800,
+            height=600,
+            add_marker=True
+        )
+        
+        if not image_path or not os.path.exists(image_path):
+            raise HTTPException(status_code=500, detail="Failed to generate image")
+        
+        # Return image file
+        from fastapi.responses import FileResponse
+        return FileResponse(
+            image_path,
+            media_type="image/png",
+            headers={
+                "Content-Disposition": f'inline; filename="location_{analysis_id}.png"'
+            }
+        )
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error generating image: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

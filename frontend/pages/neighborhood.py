@@ -346,3 +346,211 @@ def render_analysis_card(analysis: dict):
                 full_analysis = api.get_analysis(analysis_id)
                 if full_analysis:
                     display_analysis_results(full_analysis, analysis_id)
+
+
+def display_analysis_results(result: dict, analysis_id: str, generate_map: bool = True):
+    """Display analysis results with comparison feature"""
+    st.divider()
+    st.subheader("✅ Analysis Results")
+    
+    render_key_metrics(result)
+    render_walkability_interpretation(result.get('walk_score', 0))
+    
+    amenities = result.get('amenities', {})
+    if amenities:
+        render_amenities_breakdown(amenities)
+    
+    if generate_map:
+        render_interactive_map(analysis_id)
+    
+    # ✨ NEW: Add "Find Similar" button
+    st.divider()
+    render_similarity_search_section(analysis_id, result)
+
+
+def render_similarity_search_section(analysis_id: str, query_analysis: dict):
+    """Render similarity search section"""
+    st.subheader("🔍 Find Similar Neighborhoods")
+    
+    st.markdown("""
+    Discover neighborhoods with similar characteristics across the entire database.
+    Comparison based on amenities, walkability, and urban features.
+    """)
+    
+    col1, col2, col3 = st.columns([2, 1, 1])
+    
+    with col1:
+        if st.button("🔍 Find Similar Neighborhoods", type="primary", use_container_width=True, key=f"find_similar_{analysis_id}"):
+            find_and_display_similar(analysis_id, query_analysis)
+    
+    with col2:
+        limit = st.number_input("Results", min_value=1, max_value=20, value=5, key=f"limit_{analysis_id}")
+    
+    with col3:
+        threshold = st.number_input("Min Match %", min_value=0, max_value=100, value=60, key=f"threshold_{analysis_id}")
+
+
+def find_and_display_similar(analysis_id: str, query_analysis: dict):
+    """Find and display similar neighborhoods"""
+    from api_client import api
+    import requests
+    
+    with st.spinner("🔍 Searching for similar neighborhoods..."):
+        try:
+            # Get similarity threshold from session state
+            threshold = st.session_state.get(f"threshold_{analysis_id}", 60) / 100
+            limit = st.session_state.get(f"limit_{analysis_id}", 5)
+            
+            response = requests.get(
+                f"{api.base_url}/api/neighborhood/{analysis_id}/similar",
+                params={
+                    "limit": limit,
+                    "threshold": threshold
+                },
+                timeout=30
+            )
+            
+            if response.status_code != 200:
+                st.error(f"❌ Search failed: {response.text}")
+                return
+            
+            result = response.json()
+        
+        except Exception as e:
+            st.error(f"❌ Error: {e}")
+            return
+    
+    # Display results
+    report = result.get('report', {})
+    similar_neighborhoods = report.get('similar_neighborhoods', [])
+    
+    if not similar_neighborhoods:
+        st.info("ℹ️ No similar neighborhoods found")
+        st.caption(f"Try lowering the minimum match percentage (currently {threshold*100:.0f}%)")
+        return
+    
+    st.success(f"✅ Found {len(similar_neighborhoods)} similar neighborhoods!")
+    
+    # Display comparison
+    render_comparison_results(query_analysis, similar_neighborhoods, report)
+
+
+def render_comparison_results(query_analysis: dict, similar_neighborhoods: list, report: dict):
+    """Render detailed comparison results"""
+    st.divider()
+    st.subheader("📊 Comparison Results")
+    
+    # Query summary
+    query_info = report.get('query', {})
+    
+    with st.expander("📍 Reference Location (Your Search)", expanded=True):
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.metric("📍 Address", query_info.get('address', 'N/A'))
+        with col2:
+            st.metric("🚶 Walk Score", f"{query_info.get('walk_score', 0):.1f}")
+        with col3:
+            st.metric("📌 Amenities", query_info.get('total_amenities', 0))
+    
+    # Similar neighborhoods
+    st.markdown("### 🏘️ Similar Neighborhoods")
+    
+    for idx, neighborhood in enumerate(similar_neighborhoods, 1):
+        render_similarity_card(neighborhood, idx, query_info)
+
+
+def render_similarity_card(neighborhood: dict, idx: int, query_info: dict):
+    """Render individual similarity result card"""
+    similarity = neighborhood.get('similarity_score', 0) * 100
+    address = neighborhood.get('address', 'Unknown')
+    
+    with st.expander(f"#{idx} - {address} | {similarity:.1f}% Match", expanded=(idx == 1)):
+        # Similarity progress bar
+        st.progress(neighborhood.get('similarity_score', 0))
+        
+        # Metrics comparison
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            walk_score = neighborhood.get('walk_score', 0)
+            walk_diff = neighborhood.get('walk_score_diff', 0)
+            st.metric(
+                "🚶 Walk Score",
+                f"{walk_score:.1f}",
+                delta=f"{walk_diff:+.1f}" if walk_diff != 0 else None
+            )
+        
+        with col2:
+            total_amenities = neighborhood.get('total_amenities', 0)
+            query_total = query_info.get('total_amenities', 0)
+            amenity_diff = total_amenities - query_total
+            st.metric(
+                "📍 Amenities",
+                total_amenities,
+                delta=f"{amenity_diff:+d}" if amenity_diff != 0 else None
+            )
+        
+        with col3:
+            st.metric("🎯 Match", f"{similarity:.1f}%")
+        
+        with col4:
+            analysis_id = neighborhood.get('analysis_id')
+            if st.button("👁️ View Details", key=f"view_{idx}_{analysis_id}"):
+                # Open analysis in new expander
+                from api_client import api
+                full_analysis = api.get_analysis(analysis_id)
+                if full_analysis:
+                    st.session_state[f'show_analysis_{analysis_id}'] = True
+        
+        # Key differences
+        differences = neighborhood.get('key_differences', [])
+        if differences:
+            st.markdown("**🔍 Key Differences:**")
+            for diff in differences:
+                st.write(f"• {diff}")
+        
+        # Amenity breakdown comparison
+        with st.expander("📊 Detailed Amenity Comparison"):
+            render_amenity_comparison(
+                query_info.get('amenity_breakdown', {}),
+                neighborhood.get('amenity_breakdown', {})
+            )
+        
+        # Map preview
+        map_path = neighborhood.get('map_path')
+        coordinates = neighborhood.get('coordinates')
+        
+        if map_path or coordinates:
+            if st.button("🗺️ Show Map", key=f"map_{idx}_{analysis_id}"):
+                if map_path:
+                    # Show saved map
+                    analysis_id = neighborhood.get('analysis_id')
+                    render_interactive_map(analysis_id)
+                elif coordinates:
+                    # Generate quick map
+                    st.info("📍 Map generation coming soon")
+
+
+def render_amenity_comparison(query_amenities: dict, candidate_amenities: dict):
+    """Render side-by-side amenity comparison"""
+    import pandas as pd
+    
+    # Combine amenity types
+    all_types = set(list(query_amenities.keys()) + list(candidate_amenities.keys()))
+    
+    comparison_data = []
+    for amenity_type in sorted(all_types):
+        query_count = query_amenities.get(amenity_type, 0)
+        candidate_count = candidate_amenities.get(amenity_type, 0)
+        diff = candidate_count - query_count
+        
+        comparison_data.append({
+            'Amenity': amenity_type.replace('_', ' ').title(),
+            'Reference': query_count,
+            'Similar': candidate_count,
+            'Difference': f"{diff:+d}" if diff != 0 else "Same"
+        })
+    
+    df = pd.DataFrame(comparison_data)
+    st.dataframe(df, use_container_width=True, hide_index=True)

@@ -242,7 +242,7 @@ def display_green_space_results(result: Dict):
                 st.image(
                     image,
                     caption="Green spaces highlighted by type",
-                    use_container_width=True
+                    width=400
                 )
             else:
                 st.warning("Visualization image not available")
