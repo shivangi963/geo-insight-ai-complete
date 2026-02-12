@@ -209,7 +209,7 @@ def analyze_neighborhood_task(self, analysis_id: str, request_data: Dict) -> Dic
         print(f"❌ Analysis failed: {error_msg}")
         print(f"Traceback:\n{error_trace}")
         
-        if db:
+        if db is not None:
             update_analysis_status_sync(db, analysis_id, 'failed', {
                 'error': error_msg,
                 'progress': 100
@@ -221,3 +221,4 @@ def analyze_neighborhood_task(self, analysis_id: str, request_data: Dict) -> Dic
             'error': error_msg,
             'timestamp': datetime.now().isoformat()
         }
+    

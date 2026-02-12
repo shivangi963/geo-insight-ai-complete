@@ -261,6 +261,14 @@ class NeighborhoodSimilarityEngine:
                 logger.warning(f"Error comparing analysis {analysis_id}: {e}")
                 continue
         
+       # ✅ Deduplicate by address - keep only best match per unique address
+        seen_addresses = {}
+        for item in similarities:
+            addr = item['analysis'].get('address', '').strip().lower()
+            if addr not in seen_addresses or item['similarity'] > seen_addresses[addr]['similarity']:
+                seen_addresses[addr] = item
+        similarities = list(seen_addresses.values())
+        
         # Sort by similarity (descending)
         similarities.sort(key=lambda x: x['similarity'], reverse=True)
         

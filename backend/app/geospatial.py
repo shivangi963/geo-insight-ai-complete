@@ -25,6 +25,21 @@ ox.settings.use_cache = True
 ox.settings.cache_folder = "./.osmnx_cache"
 ox.settings.timeout = 30  # ✅ Add 30 second timeout
 
+KNOWN_COORDINATES = {
+        'indiranagar, bengaluru, karnataka, india': (12.9716, 77.6412),
+        'indiranagar, bangalore, karnataka, india': (12.9716, 77.6412),
+        'koramangala, bengaluru, karnataka, india': (12.9352, 77.6245),
+        'koramangala, bangalore, karnataka, india': (12.9352, 77.6245),
+        'whitefield, bengaluru, karnataka, india': (12.9698, 77.7499),
+        'hsr layout, bengaluru, karnataka, india': (12.9116, 77.6389),
+        'jayanagar, bengaluru, karnataka, india': (12.9308, 77.5838),
+        'jp nagar, bengaluru, karnataka, india': (12.9063, 77.5857),
+        'electronic city, bengaluru, karnataka, india': (12.8399, 77.6770),
+        'marathahalli, bengaluru, karnataka, india': (12.9591, 77.6974),
+        'btm layout, bengaluru, karnataka, india': (12.9166, 77.6101),
+        'malleshwaram, bengaluru, karnataka, india': (13.0035, 77.5710),
+    }
+
 
 def timeout_decorator(timeout_seconds: int = 30):
     """
@@ -54,9 +69,7 @@ def timeout_decorator(timeout_seconds: int = 30):
 
 
 class LocationGeocoder:
-    """
-    FIXED: Geocoder with proper rate limiting and error handling
-    """
+    
     
     def __init__(self, user_agent: str = "geo_insight_ai"):
         self.geolocator = Nominatim(
@@ -77,9 +90,10 @@ class LocationGeocoder:
         self.last_request_time = time.time()
     
     def address_to_coordinates(self, address: str) -> Optional[Tuple[float, float]]:
-        """
-        Convert address to coordinates with rate limiting
-        """
+        address_lower = address.lower().strip()
+        if address_lower in KNOWN_COORDINATES:
+            print(f"✅ Using cached coordinates for: {address}")
+            return KNOWN_COORDINATES[address_lower] 
         try:
             self._rate_limit()  # ✅ Enforce rate limit
             
@@ -87,10 +101,11 @@ class LocationGeocoder:
             if location:
                 return (location.latitude, location.longitude)
             return None
-        
+    
         except Exception as e:
             print(f"❌ Geocoding error for '{address}': {e}")
             return None
+        
     
     def coordinates_to_address(self, lat: float, lon: float) -> Optional[str]:
         """
