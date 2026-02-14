@@ -105,7 +105,7 @@ async def process_green_space_analysis(
     """
     try:
         from ..crud import update_analysis_status
-        from ..geospatial import LocationGeocoder, get_osm_map_area
+        from ..geospatial import get_geocoderr, get_osm_map_area
         from ..tasks.computer_vision_tasks import analyze_osm_green_spaces
         import asyncio
         
@@ -116,7 +116,7 @@ async def process_green_space_analysis(
         })
         
         # Geocode address
-        geocoder = LocationGeocoder()
+        geocoder = get_geocoderr()
         coordinates = await asyncio.to_thread(
             geocoder.address_to_coordinates, 
             address

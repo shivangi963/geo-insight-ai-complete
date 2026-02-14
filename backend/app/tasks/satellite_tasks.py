@@ -18,8 +18,7 @@ def analyze_satellite_task(self, analysis_id: str, request_data: dict) -> dict:
     try:
         from app.database import get_sync_database
         from app.tasks.computer_vision_tasks import analyze_osm_green_spaces
-        
-        from app.geospatial import LocationGeocoder, get_osm_map_area
+        from app.geospatial import get_geocoder, get_osm_map_area
         
         # Get synchronous database connection
         db = get_sync_database()
@@ -37,7 +36,7 @@ def analyze_satellite_task(self, analysis_id: str, request_data: dict) -> dict:
         radius_m = request_data.get('radius_m', 500)
         
         # Geocode address
-        geocoder = LocationGeocoder()
+        geocoder = get_geocoder()
         coordinates = geocoder.address_to_coordinates(address)
         
         if not coordinates:

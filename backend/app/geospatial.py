@@ -1,6 +1,3 @@
-"""
-FIXED: Geospatial module with proper timeouts and error handling
-"""
 import osmnx as ox
 import networkx as nx
 from geopy.geocoders import Nominatim
@@ -23,8 +20,7 @@ import os
 ox.settings.log_console = True
 ox.settings.use_cache = True
 ox.settings.cache_folder = "./.osmnx_cache"
-ox.settings.timeout = 30  # ✅ Add 30 second timeout
-
+ox.settings.timeout = 30 
 KNOWN_COORDINATES = {
         'indiranagar, bengaluru, karnataka, india': (12.9716, 77.6412),
         'indiranagar, bangalore, karnataka, india': (12.9716, 77.6412),
@@ -90,12 +86,15 @@ class LocationGeocoder:
         self.last_request_time = time.time()
     
     def address_to_coordinates(self, address: str) -> Optional[Tuple[float, float]]:
+        if not address or not isinstance(address, str):
+            print(f" Invalid address provided: {address!r}")
+            return None
         address_lower = address.lower().strip()
         if address_lower in KNOWN_COORDINATES:
             print(f"✅ Using cached coordinates for: {address}")
             return KNOWN_COORDINATES[address_lower] 
         try:
-            self._rate_limit()  # ✅ Enforce rate limit
+            self._rate_limit() 
             
             location = self.geolocator.geocode(address)
             if location:
@@ -120,15 +119,18 @@ class LocationGeocoder:
         except Exception as e:
             print(f"❌ Reverse geocoding error: {e}")
             return None
+        
+_geocoder_instance = None
+
+def get_geocoder() -> LocationGeocoder:
+    global _geocoder_instance
+    if _geocoder_instance is None:
+        _geocoder_instance = LocationGeocoder()
+    return _geocoder_instance
 
 
 class OpenStreetMapClient:
-    """
-    FIXED: OSM client with timeouts and better error handling
-    """
-    
     def __init__(self):
-        # Configure OSMnx
         ox.settings.log_console = True
         ox.settings.use_cache = True
         ox.settings.cache_folder = "./.osmnx_cache"
@@ -149,31 +151,26 @@ class OpenStreetMapClient:
                 'park', 'supermarket', 'bank', 'pharmacy'
             ]
         
-        # Scale max results based on radius
-        # Larger radius = more amenities expected
         if max_results_per_type is None:
             if radius >= 5000:
-                max_results_per_type = 50  # Large radius: up to 50 per type
+                max_results_per_type = 50  
             elif radius >= 2000:
-                max_results_per_type = 30  # Medium radius: up to 30 per type
+                max_results_per_type = 30  
             else:
-                max_results_per_type = 20  # Small radius: up to 20 per type
-        
-        # Limit amenity types based on radius to prevent timeouts
-        # Larger radius = fewer queries needed
+                max_results_per_type = 20  
+
         max_amenity_types = 6
         if radius >= 5000:
-            max_amenity_types = 3  # Large radius: only 3 amenity types for speed
+            max_amenity_types = 3  
         elif radius >= 2000:
-            max_amenity_types = 4  # Medium radius: 4 types
+            max_amenity_types = 4  
         
         if len(amenity_types) > max_amenity_types:
             print(f"⏱️ Limiting {len(amenity_types)} amenity types to {max_amenity_types} for timeout prevention (radius: {radius}m)")
             amenity_types = amenity_types[:max_amenity_types]
         
         try:
-            # Geocode with timeout
-            geocoder = LocationGeocoder()
+            geocoder = get_geocoder()
             coordinates = geocoder.address_to_coordinates(address)
             
             if not coordinates:
@@ -184,37 +181,37 @@ class OpenStreetMapClient:
             
             lat, lon = coordinates
             
-            # Calculate bounding box
-            north = lat + (radius / 111320)
-            south = lat - (radius / 111320)
-            east = lon + (radius / (111320 * abs(lat) if lat != 0 else 111320))
-            west = lon - (radius / (111320 * abs(lat) if lat != 0 else 111320))
-            
+            lat_rad = math.radians(lat)
+            delta_lat = radius / 111320
+            delta_lon = radius / (111320 * math.cos(lat_rad))
+            north = lat + delta_lat
+            south = lat - delta_lat
+            east  = lon + delta_lon
+            west  = lon - delta_lon
+                        
             amenities_data = {}
             errors = []
             timeout_count = 0
             
-            # Fetch amenities with per-type timeout
             for amenity in amenity_types:
                 try:
                     print(f"Fetching {amenity}...")
                     
-                    # Adaptive timeout based on radius
+      
                     if radius >= 5000:
-                        query_timeout = 15  # Longer timeout for large radius
+                        query_timeout = 15  
                     elif radius >= 2000:
                         query_timeout = 12
                     else:
-                        query_timeout = 10  # Default timeout
+                        query_timeout = 10 
                     
-                    # Use signal for timeout (Unix only)
                     import signal
                     
                     def timeout_handler(signum, frame):
                         raise TimeoutError(f"Query timeout for {amenity} after {query_timeout}s")
                     
                     try:
-                        # Set adaptive timeout per amenity type
+                
                         signal.signal(signal.SIGALRM, timeout_handler)
                         signal.alarm(query_timeout)
                         
@@ -223,11 +220,10 @@ class OpenStreetMapClient:
                             tags={'amenity': amenity}
                         )
                         
-                        signal.alarm(0)  # Cancel alarm
+                        signal.alarm(0)  
                         
                     except AttributeError:
-                        # Windows doesn't support SIGALRM
-                        # Just run without timeout
+                
                         amenities = ox.features.features_from_bbox(
                             north, south, east, west,
                             tags={'amenity': amenity}
@@ -244,7 +240,7 @@ class OpenStreetMapClient:
                             except Exception:
                                 continue
                             
-                            # Calculate distance
+                          
                             distance = geodesic(
                                 coordinates,
                                 (amenity_lat, amenity_lon)
@@ -260,8 +256,7 @@ class OpenStreetMapClient:
                                 'distance_km': round(distance, 2)
                             }
                             amenities_list.append(amenity_info)
-                        
-                        # Sort and limit
+                     
                         amenities_list.sort(key=lambda x: x['distance_km'])
                         amenities_data[amenity] = amenities_list[:max_results_per_type]
                     else:
@@ -274,14 +269,13 @@ class OpenStreetMapClient:
                     errors.append(error_msg)
                     amenities_data[amenity] = []
                     
-                    # If too many timeouts, stop
                     if timeout_count >= 3:
                         print(f"⚠️ Too many timeouts ({timeout_count}), stopping early")
                         break
                 
                 except Exception as e:
                     error_msg = f"Error fetching {amenity}: {str(e)}"
-                    print(f"❌ {error_msg}")
+                    print(f"{error_msg}")
                     errors.append(error_msg)
                     amenities_data[amenity] = []
             
@@ -306,12 +300,10 @@ class OpenStreetMapClient:
         address: str,
         radius: float = 500
     ) -> Dict:
-        """
-        FIXED: Get building footprints with timeout
-        """
+        
         try:
             # Geocode
-            geocoder = LocationGeocoder()
+            geocoder = get_geocoder()
             coordinates = geocoder.address_to_coordinates(address)
             
             if not coordinates:
@@ -319,7 +311,6 @@ class OpenStreetMapClient:
             
             lat, lon = coordinates
             
-            # ✅ Fetch buildings with timeout
             try:
                 buildings = ox.features.features_from_point(
                     (lat, lon),
@@ -353,7 +344,6 @@ class OpenStreetMapClient:
                         }
                         building_data.append(building_info)
                     except Exception as e:
-                        # Skip problematic buildings
                         continue
             
             return {
@@ -379,34 +369,31 @@ class OpenStreetMapClient:
         try:
             coordinates = amenities_data.get("coordinates")
             if not coordinates:
-                print("❌ No coordinates in amenities_data")
+                print(" No coordinates in amenities_data")
                 return None
             
             lat, lon = coordinates
-            
-            # ✅ FIX 1: Always use absolute path
+ 
             if not os.path.isabs(save_path):
-                # Get backend root directory
+         
                 backend_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
                 save_path = os.path.join(backend_root, save_path)
             
-            # ✅ FIX 2: Ensure directory exists
+          
             os.makedirs(os.path.dirname(save_path), exist_ok=True)
             
-            print(f"📍 Creating map for: {address}")
-            print(f"📍 Coordinates: ({lat:.4f}, {lon:.4f})")
-            print(f"📁 Saving to: {save_path}")
+            print(f" Creating map for: {address}")
+            print(f" Coordinates: ({lat:.4f}, {lon:.4f})")
+            print(f" Saving to: {save_path}")
             
-            # ✅ FIX 3: Create map with better configuration
             m = folium.Map(
                 location=[lat, lon],
                 zoom_start=15,
                 tiles='OpenStreetMap',
                 control_scale=True,
-                prefer_canvas=True  # Better performance
+                prefer_canvas=True 
             )
             
-            # Add target marker with custom icon
             folium.Marker(
                 [lat, lon],
                 popup=folium.Popup(f"<b>📍 Target Location</b><br>{address}", max_width=300),
@@ -414,7 +401,7 @@ class OpenStreetMapClient:
                 icon=folium.Icon(color="red", icon="star", prefix='fa')
             ).add_to(m)
             
-            # Amenity colors
+     
             colors = {
                 'restaurant': 'blue',
                 'cafe': 'green',
@@ -429,7 +416,6 @@ class OpenStreetMapClient:
                 'transit_station': 'gray'
             }
             
-            # Add amenity markers
             amenities = amenities_data.get("amenities", {})
             marker_count = 0
             
@@ -459,10 +445,10 @@ class OpenStreetMapClient:
                             ).add_to(m)
                             marker_count += 1
                     except Exception as e:
-                        print(f"⚠️ Skipping marker: {e}")
+                        print(f" Skipping marker: {e}")
                         continue
             
-            print(f"✅ Added {marker_count} amenity markers")
+            print(f" Added {marker_count} amenity markers")
             
             # Add search radius circle
             search_radius = amenities_data.get("search_radius_m", 1000)
@@ -478,40 +464,36 @@ class OpenStreetMapClient:
                 tooltip=f"{search_radius}m radius"
             ).add_to(m)
             
-            # ✅ FIX 4: Add layer control
             folium.LayerControl().add_to(m)
             
-            # ✅ FIX 5: Save map
+
             try:
                 m.save(save_path)
-                print(f"💾 Map saved successfully")
+                print(f" Map saved successfully")
             except Exception as save_error:
-                print(f"❌ Error saving map: {save_error}")
+                print(f" Error saving map: {save_error}")
                 return None
-            
-            # ✅ FIX 6: Verify file was created
+
             if os.path.exists(save_path):
                 file_size = os.path.getsize(save_path)
                 if file_size < 1000:  # File too small, likely error
-                    print(f"⚠️ Map file seems too small: {file_size} bytes")
+                    print(f" Map file seems too small: {file_size} bytes")
                     return None
-                print(f"✅ Map verified: {save_path} ({file_size:,} bytes)")
+                print(f" Map verified: {save_path} ({file_size:,} bytes)")
                 return save_path
             else:
-                print(f"❌ Map file not found after save: {save_path}")
+                print(f" Map file not found after save: {save_path}")
                 return None
         
         except Exception as e:
-            print(f"❌ Error creating map: {e}")
+            print(f" Error creating map: {e}")
             import traceback
             traceback.print_exc()
             return None
 
 
 def calculate_walk_score(coordinates: Tuple[float, float], amenities_data: Dict) -> float:
-    """
-    FIXED: Calculate walk score with better error handling
-    """
+
     try:
         amenities = amenities_data.get("amenities", {})
         
