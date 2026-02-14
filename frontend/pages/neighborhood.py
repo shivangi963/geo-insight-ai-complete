@@ -1,9 +1,8 @@
 """
 Neighborhood Intelligence Page
-Three independent tools:
+Two independent tools:
   1. Neighborhood Analysis  – run a full OSM + walk-score analysis
   2. Green Space Analysis    – standalone address → green-space calculator
-  3. Find Similar             – pick any past analysis and find matches
 """
 import streamlit as st
 import requests
@@ -29,13 +28,12 @@ from config import map_config, TASK_MAX_WAIT, TASK_POLL_INTERVAL
 def render_neighborhood_page():
     render_section_header("Neighborhood Intelligence")
     st.markdown(
-        "Three independent tools — run any of them without needing the others first."
+        "Two independent tools — run any of them without needing the other first."
     )
 
-    tab1, tab2, tab3 = st.tabs([
+    tab1, tab2 = st.tabs([
         "🗺️ Neighborhood Analysis",
         "🌳 Green Space Analysis",
-        "🔍 Find Similar Neighborhoods",
     ])
 
     with tab1:
@@ -43,9 +41,6 @@ def render_neighborhood_page():
 
     with tab2:
         _render_green_space_tab()
-
-    with tab3:
-        _render_find_similar_tab()
 
 
 # ══════════════════════════════════════════════
@@ -554,209 +549,3 @@ def _render_green_card(analysis: dict):
                     st.write(f"- {k.replace('_',' ').title()}: {v}%")
         else:
             st.write(f"Status: {status}")
-
-
-# ══════════════════════════════════════════════
-# TAB 3 – FIND SIMILAR NEIGHBORHOODS (standalone)
-# ══════════════════════════════════════════════
-
-def _render_find_similar_tab():
-    """Standalone similarity search — no new analysis required."""
-    st.subheader("🔍 Find Similar Neighborhoods")
-    st.markdown(
-        "Select any **previously completed** neighborhood analysis as your "
-        "reference location, then discover areas with similar characteristics "
-        "across the entire database — **no new analysis needed**."
-    )
-
-    # ── Load completed analyses ──────────────────
-    recent_resp = api.get("/api/neighborhood/recent", params={"limit": 50})
-    analyses    = (recent_resp or {}).get("analyses", [])
-    completed   = [a for a in analyses if a.get("status") == "completed"]
-
-    if not completed:
-        st.warning(
-            "⚠️ No completed analyses found yet. "
-            "Run at least one Neighborhood Analysis first, then come back here."
-        )
-        st.info(
-            "💡 Tip: Go to the **🗺️ Neighborhood Analysis** tab, enter an address "
-            "and click *Start Analysis*. Once it finishes you can use it here."
-        )
-        return
-
-    # ── Reference selector ───────────────────────
-    st.markdown("### 1️⃣ Choose Your Reference Location")
-
-    options = {
-        f"{a.get('address', 'Unknown')} "
-        f"(WS: {a.get('walk_score', 0):.0f} | "
-        f"Amenities: {a.get('total_amenities', 0)})": a.get("analysis_id")
-        for a in completed
-    }
-
-    selected_label = st.selectbox(
-        "Reference analysis", list(options.keys()), key="fs_reference_select"
-    )
-    selected_analysis_id = options[selected_label]
-
-    # Show summary card for selected reference
-    ref_analysis = next((a for a in completed if a.get("analysis_id") == selected_analysis_id), None)
-    if ref_analysis:
-        with st.container(border=True):
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("🚶 Walk Score", f"{ref_analysis.get('walk_score', 0):.1f}")
-            with col2:
-                st.metric("📍 Amenities", ref_analysis.get("total_amenities", 0))
-            with col3:
-                st.metric("🗓️ Date", (ref_analysis.get("created_at") or "")[:10])
-
-    st.markdown("### 2️⃣ Search Parameters")
-    col1, col2 = st.columns(2)
-    with col1:
-        limit = st.slider("Max results", 1, 20, 5, key="fs_limit")
-    with col2:
-        threshold_pct = st.slider("Min similarity %", 0, 100, 60, key="fs_threshold")
-
-    # ── Search button ────────────────────────────
-    if st.button("🔍 Find Similar Neighborhoods", type="primary",
-                 use_container_width=True, key="fs_run"):
-        _run_find_similar(selected_analysis_id, limit, threshold_pct / 100)
-
-    # ── Display stored results ───────────────────
-    if "fs_results" in st.session_state and st.session_state.fs_results:
-        st.divider()
-        _render_similarity_results(st.session_state.fs_results)
-
-
-def _run_find_similar(analysis_id: str, limit: int, threshold: float):
-    """Call API and store results in session state."""
-    with st.spinner("🔍 Searching for similar neighborhoods…"):
-        try:
-            resp = requests.get(
-                f"{api.base_url}/api/neighborhood/{analysis_id}/similar",
-                params={"limit": limit, "threshold": threshold},
-                timeout=30,
-            )
-        except requests.exceptions.RequestException as e:
-            show_error_message(f"Network error: {e}")
-            st.session_state.fs_results = None
-            return
-
-    if resp.status_code != 200:
-        show_error_message(f"Search failed: {resp.text}")
-        st.session_state.fs_results = None
-        return
-
-    data   = resp.json()
-    report = data.get("report", {})
-    found  = report.get("similar_neighborhoods", [])
-
-    if not found:
-        st.info(
-            f"ℹ️ No similar neighborhoods found at {threshold*100:.0f}% threshold. "
-            "Try lowering the minimum similarity."
-        )
-        st.session_state.fs_results = None
-        return
-
-    show_success_message(f"Found {len(found)} similar neighborhood(s)!")
-    st.session_state.fs_results = {"neighborhoods": found, "report": report,
-                                    "query_analysis_id": analysis_id}
-
-
-def _render_similarity_results(data: dict):
-    neighborhoods = data["neighborhoods"]
-    report        = data["report"]
-    query_info    = report.get("query", {})
-
-    st.subheader(f"📊 Results — {len(neighborhoods)} match(es)")
-
-    # Reference summary
-    with st.container(border=True):
-        st.markdown("**📍 Reference Location**")
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.write(f"**Address:** {query_info.get('address', 'N/A')}")
-        with col2:
-            st.metric("Walk Score", f"{query_info.get('walk_score', 0):.1f}")
-        with col3:
-            st.metric("Amenities", query_info.get("total_amenities", 0))
-
-    st.markdown("---")
-
-    for idx, nb in enumerate(neighborhoods, 1):
-        _render_similarity_card(nb, idx, query_info)
-
-
-def _render_similarity_card(nb: dict, idx: int, query_info: dict):
-    similarity = nb.get("similarity_score", 0) * 100
-    address    = nb.get("address", "Unknown")
-
-    with st.expander(
-        f"#{idx} — {address}  |  {similarity:.1f}% match",
-        expanded=(idx == 1),
-    ):
-        st.progress(nb.get("similarity_score", 0))
-
-        col1, col2, col3, col4 = st.columns(4)
-        walk_diff = nb.get("walk_score_diff", 0)
-        with col1:
-            st.metric("🚶 Walk Score", f"{nb.get('walk_score', 0):.1f}",
-                      delta=f"{walk_diff:+.1f}" if walk_diff else None)
-        with col2:
-            amenity_diff = nb.get("total_amenities", 0) - query_info.get("total_amenities", 0)
-            st.metric("📍 Amenities", nb.get("total_amenities", 0),
-                      delta=f"{amenity_diff:+d}" if amenity_diff else None)
-        with col3:
-            st.metric("🎯 Match", f"{similarity:.1f}%")
-        with col4:
-            aid = nb.get("analysis_id")
-            if aid and st.button("🗺️ View Map", key=f"fs_map_{idx}_{aid}"):
-                st.session_state[f"fs_show_map_{idx}"] = True
-
-        # Key differences
-        diffs = nb.get("key_differences", [])
-        if diffs:
-            st.markdown("**🔍 Key Differences:**")
-            for d in diffs:
-                st.write(f"• {d}")
-
-        # Amenity comparison toggle
-        if st.checkbox("📊 Show Amenity Comparison", key=f"fs_cmp_{idx}"):
-            _render_amenity_comparison(
-                query_info.get("amenity_breakdown", {}),
-                nb.get("amenity_breakdown", {}),
-            )
-
-        # Map
-        if st.session_state.get(f"fs_show_map_{idx}"):
-            aid = nb.get("analysis_id")
-            if aid:
-                map_url = f"{api.base_url}/api/neighborhood/{aid}/map"
-                try:
-                    html_resp = requests.get(map_url, timeout=10)
-                    if html_resp.status_code == 200:
-                        st.components.v1.html(html_resp.text, height=500, scrolling=True)
-                    else:
-                        st.warning("Map not available")
-                except Exception as e:
-                    st.warning(f"Could not load map: {e}")
-
-
-def _render_amenity_comparison(query_a: dict, candidate_a: dict):
-    import pandas as pd
-    all_types = set(list(query_a) + list(candidate_a))
-    rows = []
-    for t in sorted(all_types):
-        qc = query_a.get(t, 0)
-        cc = candidate_a.get(t, 0)
-        diff = cc - qc
-        rows.append({
-            "Amenity": t.replace("_", " ").title(),
-            "Reference": qc,
-            "Similar": cc,
-            "Difference": f"{diff:+d}" if diff != 0 else "Same",
-        })
-    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)

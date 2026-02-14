@@ -40,7 +40,7 @@ async def update_analysis_progress(analysis_id: str, progress: int, message: str
             update_data["message"] = message
         if data:
             update_data.update(data)
-        
+
         await update_analysis_status(analysis_id, "processing", update_data)
     except Exception as e:
         logger.error(f"Failed to update progress for {analysis_id}: {e}")
@@ -63,29 +63,29 @@ async def process_neighborhood_sync(
             radius=radius_m,
             amenity_types=amenity_types
         )
-        
+
         if "error" in amenities_data:
             await update_analysis_status(analysis_id, "failed", {
                 "error": amenities_data["error"],
                 "progress": 100
             })
             return
-        
+
         await update_analysis_progress(analysis_id, PROGRESS_AMENITIES, "Calculating walk score...")
-        
+
         # Calculate walk score
         coordinates = amenities_data.get("coordinates")
         walk_score = None
         if coordinates:
             walk_score = await asyncio.to_thread(calculate_walk_score, coordinates, amenities_data)
-        
+
         await update_analysis_progress(
             analysis_id,
             PROGRESS_WALK_SCORE,
             "Generating map..." if generate_map else "Finalizing...",
             {"walk_score": walk_score}
         )
-        
+
         # Map generation
         map_path = None
         if generate_map and coordinates:
@@ -93,7 +93,7 @@ async def process_neighborhood_sync(
             try:
                 map_filename = f"neighborhood_{analysis_id.replace('-', '_')}.html"
                 map_path = os.path.join("maps", map_filename)
-                
+
                 result = await asyncio.to_thread(
                     osm_client.create_map_visualization,
                     address=address,
@@ -103,11 +103,11 @@ async def process_neighborhood_sync(
                 map_path = result if result and os.path.exists(result) else None
             except Exception as e:
                 logger.error(f"Map generation failed: {e}")
-        
+
         # Complete
         amenities = amenities_data.get("amenities", {})
         total_amenities = sum(len(items) for items in amenities.values())
-        
+
         result_data = {
             "walk_score": walk_score,
             "map_path": map_path,
@@ -117,10 +117,10 @@ async def process_neighborhood_sync(
             "progress": PROGRESS_COMPLETE,
             "completed_at": datetime.now().isoformat()
         }
-        
+
         await update_analysis_status(analysis_id, "completed", result_data)
         logger.info(f"Analysis {analysis_id} completed")
-        
+
     except Exception as e:
         logger.error(f"Analysis failed: {e}", exc_info=True)
         await update_analysis_status(analysis_id, "failed", {
@@ -146,10 +146,10 @@ async def analyze_neighborhood(
             "progress": 0,
             "created_at": datetime.now().isoformat()
         }
-        
+
         analysis_id = await create_neighborhood_analysis(analysis_doc)
         logger.info(f"Created analysis: {analysis_id}")
-        
+
         # Check for Celery
         CELERY_AVAILABLE = False
         try:
@@ -158,9 +158,9 @@ async def analyze_neighborhood(
             CELERY_AVAILABLE = True
         except ImportError:
             pass
-        
+
         use_celery = CELERY_AVAILABLE
-        
+
         if use_celery:
             try:
                 from ..tasks.geospatial_tasks import analyze_neighborhood_task
@@ -173,7 +173,7 @@ async def analyze_neighborhood(
             except ImportError:
                 logger.warning("Celery task import failed")
                 use_celery = False
-        
+
         if not use_celery:
             task_id = f"analysis_{analysis_id}"
             background_tasks.add_task(
@@ -186,7 +186,7 @@ async def analyze_neighborhood(
                 analysis_request.generate_map
             )
             logger.info(f"Background task scheduled: {task_id}")
-        
+
         return NeighborhoodAnalysisResponse(
             analysis_id=analysis_id,
             task_id=task_id,
@@ -207,16 +207,15 @@ async def get_recent(limit: int = Query(10)):
     """Get recent analyses"""
     try:
         analyses = await get_recent_analyses(limit)
-        
-        # If no analyses found, return empty list (not 404)
+
         if not analyses:
             return {"analyses": []}
-        
+
         formatted_analyses = []
         for analysis in analyses:
             amenities = analysis.get('amenities', {})
             total_amenities = sum(len(items) for items in amenities.values())
-            
+
             formatted_analyses.append({
                 "analysis_id": str(analysis.get("id", analysis.get("_id", ""))),
                 "address": analysis.get("address", "Unknown"),
@@ -227,12 +226,12 @@ async def get_recent(limit: int = Query(10)):
                 "map_available": bool(analysis.get("map_path")),
                 "amenity_categories": len(amenities)
             })
-        
+
         return {"analyses": formatted_analyses}
-        
+
     except Exception as e:
         logger.error(f"Failed to get recent analyses: {e}")
-        return {"analyses": []}  # Return empty list on error instead of 500
+        return {"analyses": []}
 
 
 @router.get("/{analysis_id}", response_model=NeighborhoodAnalysis)
@@ -242,7 +241,7 @@ async def get_analysis(analysis_id: str):
         analysis = await get_neighborhood_analysis(analysis_id)
         if not analysis:
             raise HTTPException(status_code=404, detail="Analysis not found")
-        
+
         # Convert coordinates from list to dict if needed
         coordinates = analysis.get('coordinates')
         if isinstance(coordinates, (list, tuple)) and len(coordinates) == 2:
@@ -252,13 +251,13 @@ async def get_analysis(analysis_id: str):
             }
         elif not isinstance(coordinates, dict):
             analysis['coordinates'] = None
-        
+
         amenities = analysis.get('amenities', {})
         analysis['total_amenities'] = sum(len(items) for items in amenities.values())
         analysis['amenity_categories'] = len(amenities)
-        
+
         return analysis
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -271,120 +270,48 @@ async def get_analysis_map(analysis_id: str):
     """Get the interactive map for an analysis"""
     try:
         analysis = await get_neighborhood_analysis(analysis_id)
-        
+
         if not analysis:
             raise HTTPException(status_code=404, detail="Analysis not found")
-        
+
         if analysis.get("status") != "completed":
             raise HTTPException(
-                status_code=400, 
+                status_code=400,
                 detail=f"Analysis not completed. Status: {analysis.get('status')}"
             )
-        
+
         map_path = analysis.get("map_path")
-        
+
         if not map_path:
             raise HTTPException(status_code=404, detail="Map not generated")
-        
-        
+
         if not os.path.isabs(map_path):
             backend_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
             map_path = os.path.join(backend_root, map_path)
-        
+
         if not os.path.exists(map_path):
             raise HTTPException(
-                status_code=404, 
+                status_code=404,
                 detail=f"Map file not found: {os.path.basename(map_path)}"
             )
-    
+
         return FileResponse(
             map_path,
             media_type="text/html",
             headers={
                 "Content-Type": "text/html; charset=utf-8",
-                "Content-Disposition": "inline", 
+                "Content-Disposition": "inline",
                 "Cache-Control": "no-cache"
             }
         )
-        
+
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to get map for {analysis_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-    
 
-@router.get("/{analysis_id}/similar")
-async def find_similar_neighborhoods(
-    analysis_id: str,
-    limit: int = Query(5, ge=1, le=20, description="Number of similar neighborhoods"),
-    threshold: float = Query(0.6, ge=0.0, le=1.0, description="Minimum similarity score")
-):
-    try:
-        from ..similarity_engine import similarity_engine
-        
-        logger.info(f"Finding similar neighborhoods for {analysis_id}")
-        
-        # Get the query analysis
-        query_analysis = await get_neighborhood_analysis(analysis_id)
-        
-        if not query_analysis:
-            raise HTTPException(status_code=404, detail="Analysis not found")
-        
-        query_address = query_analysis.get('address', '').strip().lower()
-        
-        if query_analysis.get('status') != 'completed':
-            raise HTTPException(
-                status_code=400, 
-                detail=f"Analysis not completed. Status: {query_analysis.get('status')}"
-            )
-        
-        # Get all completed analyses from database
-        from ..database import get_database
-        db = await get_database()
-        
-        cursor = db.neighborhood_analyses.find({'status': 'completed'})
-        all_analyses = []
-        
-        async for doc in cursor:
-            if "_id" in doc:
-                doc["id"] = str(doc["_id"])
-                del doc["_id"]
-            all_analyses.append(doc)
-        
-        logger.info(f"Comparing against {len(all_analyses)} completed analyses")
-        
-        # Find similar neighborhoods
-        similar = similarity_engine.find_similar_neighborhoods(
-            query_analysis=query_analysis,
-            all_analyses=all_analyses,
-            limit=limit,
-            threshold=threshold,
-            query_address=query_address
-        )
-        
-        # Create comparison report
-        report = similarity_engine.create_comparison_report(
-            query_analysis=query_analysis,
-            similar_neighborhoods=similar
-        )
-        
-        logger.info(f"Found {len(similar)} similar neighborhoods")
-        
-        return {
-            'status': 'success',
-            'query_analysis_id': analysis_id,
-            'total_found': len(similar),
-            'threshold_used': threshold,
-            'report': report
-        }
-    
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error finding similar neighborhoods: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
-    
+
 @router.get("/{analysis_id}/generate-image")
 async def generate_location_image(analysis_id: str):
     """
@@ -393,23 +320,23 @@ async def generate_location_image(analysis_id: str):
     """
     try:
         from ..image_generator import image_generator
-        
+
         analysis = await get_neighborhood_analysis(analysis_id)
-        
+
         if not analysis:
             raise HTTPException(status_code=404, detail="Analysis not found")
-        
+
         coordinates = analysis.get('coordinates')
         if not coordinates:
             raise HTTPException(status_code=400, detail="No coordinates available")
-        
+
         # Get lat/lon
         if isinstance(coordinates, (list, tuple)):
             lat, lon = coordinates
         else:
             lat = coordinates.get('latitude')
             lon = coordinates.get('longitude')
-        
+
         # Generate image
         image_path = image_generator.generate_osm_static_map(
             latitude=lat,
@@ -419,11 +346,10 @@ async def generate_location_image(analysis_id: str):
             height=600,
             add_marker=True
         )
-        
+
         if not image_path or not os.path.exists(image_path):
             raise HTTPException(status_code=500, detail="Failed to generate image")
-        
-        # Return image file
+
         from fastapi.responses import FileResponse
         return FileResponse(
             image_path,
@@ -432,7 +358,7 @@ async def generate_location_image(analysis_id: str):
                 "Content-Disposition": f'inline; filename="location_{analysis_id}.png"'
             }
         )
-    
+
     except HTTPException:
         raise
     except Exception as e:
